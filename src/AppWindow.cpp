@@ -128,23 +128,26 @@ int AppWindow::Run()
                     MWMO_INPUTAVAILABLE);
             }
 
-            if (frameHandle && waitResult == WAIT_OBJECT_0)
-            {
-                OnRenderFrame();
-            }
-            else if (!frameHandle && waitResult == WAIT_TIMEOUT)
-            {
-                OnRenderFrame();
-            }
-            else if (waitResult == WAIT_FAILED)
+            const bool frameReady = frameHandle && waitResult == WAIT_OBJECT_0;
+            const bool fallbackFrameReady = !frameHandle && waitResult == WAIT_TIMEOUT;
+            const bool waitFailed = waitResult == WAIT_FAILED;
+            if (waitFailed)
             {
                 DebugLogHResult(L"MsgWaitForMultipleObjectsEx", HResultFromLastError());
-                OnRenderFrame();
             }
 
             if (!DispatchPendingMessages(message, exitCode))
             {
                 return exitCode;
+            }
+
+            if (frameReady || fallbackFrameReady || waitFailed)
+            {
+                OnRenderFrame();
+            }
+            else if (frameHandle && ShouldDriveRenderFrames() && WaitForSingleObject(frameHandle, 0) == WAIT_OBJECT_0)
+            {
+                OnRenderFrame();
             }
             continue;
         }

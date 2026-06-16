@@ -31,7 +31,6 @@ public:
 private:
     HRESULT CreateTargetBitmap();
     HRESULT EnsureBrushes();
-    float SnapDipToPixel(float dip) const;
 
     GraphicsDevice* graphicsDevice_ = nullptr;
     CompositionHost* compositionHost_ = nullptr;

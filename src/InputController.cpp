@@ -391,12 +391,38 @@ void InputController::ResetSamples()
 {
     previousSample_ = {};
     latestSample_ = {};
+    smoothedVelocityX_ = 0.0f;
+    smoothedVelocityY_ = 0.0f;
+    hasSmoothedVelocity_ = false;
 }
 
 void InputController::RecordSample(PointDip point, std::int64_t qpc)
 {
     if (latestSample_.valid)
     {
+        const double deltaSeconds = CounterSeconds(qpc - latestSample_.qpc);
+        if (deltaSeconds >= 0.002 && deltaSeconds <= 0.060)
+        {
+            const float velocityX = static_cast<float>((point.x - latestSample_.point.x) / deltaSeconds);
+            const float velocityY = static_cast<float>((point.y - latestSample_.point.y) / deltaSeconds);
+            const float speed = std::hypot(velocityX, velocityY);
+            if (speed >= 8.0f && speed <= 4000.0f)
+            {
+                constexpr float kVelocityBlend = 0.30f;
+                if (hasSmoothedVelocity_)
+                {
+                    smoothedVelocityX_ = smoothedVelocityX_ * (1.0f - kVelocityBlend) + velocityX * kVelocityBlend;
+                    smoothedVelocityY_ = smoothedVelocityY_ * (1.0f - kVelocityBlend) + velocityY * kVelocityBlend;
+                }
+                else
+                {
+                    smoothedVelocityX_ = velocityX;
+                    smoothedVelocityY_ = velocityY;
+                    hasSmoothedVelocity_ = true;
+                }
+            }
+        }
+
         previousSample_ = latestSample_;
     }
 
@@ -405,34 +431,35 @@ void InputController::RecordSample(PointDip point, std::int64_t qpc)
 
 PointDip InputController::PredictPointerPosition(std::int64_t nowQpc) const
 {
-    if (!latestSample_.valid || !previousSample_.valid)
+    if (!latestSample_.valid || !previousSample_.valid || !hasSmoothedVelocity_)
     {
         return latestSample_.valid ? latestSample_.point : PointDip{};
     }
 
-    const double sampleDeltaSeconds = CounterSeconds(latestSample_.qpc - previousSample_.qpc);
-    if (sampleDeltaSeconds <= 0.0)
-    {
-        return latestSample_.point;
-    }
-
     const double sampleAgeSeconds = CounterSeconds(nowQpc - latestSample_.qpc);
-    if (sampleAgeSeconds <= 0.0 || sampleAgeSeconds > 0.040)
+    if (sampleAgeSeconds <= 0.0 || sampleAgeSeconds > 0.032)
     {
         return latestSample_.point;
     }
 
-    const float velocityX = static_cast<float>((latestSample_.point.x - previousSample_.point.x) / sampleDeltaSeconds);
-    const float velocityY = static_cast<float>((latestSample_.point.y - previousSample_.point.y) / sampleDeltaSeconds);
-    const float speed = std::hypot(velocityX, velocityY);
+    const float speed = std::hypot(smoothedVelocityX_, smoothedVelocityY_);
     if (speed < 8.0f)
     {
         return latestSample_.point;
     }
 
-    constexpr double kMaxPredictionSeconds = 0.012;
+    constexpr double kMaxPredictionSeconds = 0.008;
+    constexpr float kMaxPredictionDistance = 6.0f;
     const double predictionSeconds = std::clamp(sampleAgeSeconds, 0.0, kMaxPredictionSeconds);
-    return {
-        latestSample_.point.x + velocityX * static_cast<float>(predictionSeconds),
-        latestSample_.point.y + velocityY * static_cast<float>(predictionSeconds)};
+    float offsetX = smoothedVelocityX_ * static_cast<float>(predictionSeconds);
+    float offsetY = smoothedVelocityY_ * static_cast<float>(predictionSeconds);
+    const float offsetLength = std::hypot(offsetX, offsetY);
+    if (offsetLength > kMaxPredictionDistance)
+    {
+        const float scale = kMaxPredictionDistance / offsetLength;
+        offsetX *= scale;
+        offsetY *= scale;
+    }
+
+    return {latestSample_.point.x + offsetX, latestSample_.point.y + offsetY};
 }

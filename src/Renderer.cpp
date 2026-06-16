@@ -7,8 +7,6 @@
 #include <d2d1_1helper.h>
 #include <dxgi1_2.h>
 
-#include <cmath>
-
 HRESULT Renderer::Initialize(GraphicsDevice& graphicsDevice, CompositionHost& compositionHost, float dpi)
 {
     graphicsDevice_ = &graphicsDevice;
@@ -58,10 +56,10 @@ HRESULT Renderer::Render(const RectangleModel& rectangle, const PointDip* visual
     const SizeDip size = rectangle.Size();
     const D2D1_ROUNDED_RECT roundedRect = D2D1::RoundedRect(
         D2D1::RectF(
-            SnapDipToPixel(position.x),
-            SnapDipToPixel(position.y),
-            SnapDipToPixel(position.x + size.width),
-            SnapDipToPixel(position.y + size.height)),
+            position.x,
+            position.y,
+            position.x + size.width,
+            position.y + size.height),
         18.0f,
         18.0f);
 
@@ -181,7 +179,3 @@ HRESULT Renderer::EnsureBrushes()
     return S_OK;
 }
 
-float Renderer::SnapDipToPixel(float dip) const
-{
-    return std::round(dip * dpi_ / 96.0f) * 96.0f / dpi_;
-}

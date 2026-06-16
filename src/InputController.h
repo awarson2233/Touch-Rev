@@ -64,4 +64,7 @@ private:
     float dragOffsetY_ = 0.0f;
     PointerSample previousSample_{};
     PointerSample latestSample_{};
+    float smoothedVelocityX_ = 0.0f;
+    float smoothedVelocityY_ = 0.0f;
+    bool hasSmoothedVelocity_ = false;
 };
