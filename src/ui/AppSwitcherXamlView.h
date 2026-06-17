@@ -48,8 +48,9 @@ private:
     bool initialized_ = false;
 
     winrt::Windows::UI::Xaml::Controls::Grid root_{nullptr};
+    winrt::Windows::UI::Xaml::FrameworkElement appSwitcherContainer_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Canvas layoutCanvas_{nullptr};
-    winrt::Windows::UI::Xaml::Media::TranslateTransform layoutTransform_{nullptr};
+    winrt::Windows::UI::Xaml::Media::TranslateTransform containerTransform_{nullptr};
     winrt::Windows::UI::Xaml::FrameworkElement focusBorder_{nullptr};
     winrt::Windows::UI::Xaml::FrameworkElement emptyGrid_{nullptr};
     std::vector<ItemView> items_;

@@ -4,17 +4,26 @@
     x:Name="RootGrid"
     Background="#66000000">
 
-    <Canvas x:Name="LayoutCanvas">
-        <Border
-            x:Name="FocusBorder"
-            BorderBrush="#FF4CC2FF"
-            BorderThickness="4"
-            Canvas.ZIndex="100"
-            CornerRadius="20"
-            IsHitTestVisible="False"
-            Visibility="Collapsed"
-            Background="#224CC2FF" />
-    </Canvas>
+    <Border
+        x:Name="AppSwitcherContainer"
+        HorizontalAlignment="Center"
+        VerticalAlignment="Center"
+        Background="#CC181818"
+        BorderBrush="#55FFFFFF"
+        BorderThickness="1"
+        CornerRadius="24">
+        <Canvas x:Name="LayoutCanvas">
+            <Border
+                x:Name="FocusBorder"
+                BorderBrush="#FF4CC2FF"
+                BorderThickness="4"
+                Canvas.ZIndex="100"
+                CornerRadius="20"
+                IsHitTestVisible="False"
+                Visibility="Collapsed"
+                Background="#224CC2FF" />
+        </Canvas>
+    </Border>
 
     <Grid
         x:Name="EmptyGrid"

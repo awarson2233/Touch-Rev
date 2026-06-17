@@ -93,8 +93,9 @@ bool AppSwitcherXamlView::Initialize(HWND hwnd, ThinXamlAppSwitcherHost& host)
 void AppSwitcherXamlView::Shutdown()
 {
     items_.clear();
+    appSwitcherContainer_ = nullptr;
     layoutCanvas_ = nullptr;
-    layoutTransform_ = nullptr;
+    containerTransform_ = nullptr;
     focusBorder_ = nullptr;
     emptyGrid_ = nullptr;
     root_ = nullptr;
@@ -127,10 +128,10 @@ void AppSwitcherXamlView::SetDragPosition(PointDip position)
     dragPosition_.x = std::clamp(dragPosition_.x, minX, 0.0f);
     dragPosition_.y = std::clamp(dragPosition_.y, minY, 0.0f);
 
-    if (layoutTransform_)
+    if (containerTransform_)
     {
-        layoutTransform_.X(dragPosition_.x);
-        layoutTransform_.Y(dragPosition_.y);
+        containerTransform_.X(dragPosition_.x);
+        containerTransform_.Y(dragPosition_.y);
     }
 }
 
@@ -213,9 +214,10 @@ bool AppSwitcherXamlView::LoadRoot()
 
         auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
         root_ = object.as<winrt::Windows::UI::Xaml::Controls::Grid>();
+        appSwitcherContainer_ = root_.FindName(L"AppSwitcherContainer").as<winrt::Windows::UI::Xaml::FrameworkElement>();
         layoutCanvas_ = root_.FindName(L"LayoutCanvas").as<winrt::Windows::UI::Xaml::Controls::Canvas>();
-        layoutTransform_ = winrt::Windows::UI::Xaml::Media::TranslateTransform();
-        layoutCanvas_.RenderTransform(layoutTransform_);
+        containerTransform_ = winrt::Windows::UI::Xaml::Media::TranslateTransform();
+        appSwitcherContainer_.RenderTransform(containerTransform_);
         focusBorder_ = root_.FindName(L"FocusBorder").as<winrt::Windows::UI::Xaml::FrameworkElement>();
         emptyGrid_ = root_.FindName(L"EmptyGrid").as<winrt::Windows::UI::Xaml::FrameworkElement>();
 
@@ -282,6 +284,13 @@ void AppSwitcherXamlView::ApplyLayout(
     contentBoundsDip_ = {
         static_cast<float>(static_cast<double>(layout.totalSizePx.cx) / safeScale),
         static_cast<float>(static_cast<double>(layout.totalSizePx.cy) / safeScale)};
+    if (appSwitcherContainer_)
+    {
+        appSwitcherContainer_.Width(contentBoundsDip_.width);
+        appSwitcherContainer_.Height(contentBoundsDip_.height);
+    }
+    layoutCanvas_.Width(contentBoundsDip_.width);
+    layoutCanvas_.Height(contentBoundsDip_.height);
     SetDragPosition(dragPosition_);
 
     for (size_t i = 0; i < items_.size(); ++i)
