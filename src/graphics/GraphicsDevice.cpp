@@ -1,6 +1,6 @@
 #include "GraphicsDevice.h"
 
-#include "Win32Error.h"
+#include "common/Win32Error.h"
 
 #include <array>
 

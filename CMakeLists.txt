@@ -1,30 +1,34 @@
 cmake_minimum_required(VERSION 3.24)
 
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 project(TouchRevGUI LANGUAGES CXX)
 
 add_executable(TouchRevGUI WIN32
     src/main.cpp
-    src/AppWindow.cpp
-    src/AppWindow.h
-    src/AnimationSystem.cpp
-    src/AnimationSystem.h
-    src/BackdropController.cpp
-    src/BackdropController.h
-    src/CompositionHost.cpp
-    src/CompositionHost.h
-    src/CoordinateSpace.h
-    src/GraphicsDevice.cpp
-    src/GraphicsDevice.h
-    src/InputController.cpp
-    src/InputController.h
-    src/RectangleModel.h
-    src/Renderer.cpp
-    src/Renderer.h
-    src/Win32Error.cpp
-    src/Win32Error.h
+    src/ui/AppWindow.cpp
+    src/ui/AppWindow.h
+    src/ui/AnimationSystem.cpp
+    src/ui/AnimationSystem.h
+    src/ui/BackdropController.cpp
+    src/ui/BackdropController.h
+    src/graphics/CompositionHost.cpp
+    src/graphics/CompositionHost.h
+    src/common/CoordinateSpace.h
+    src/graphics/GraphicsDevice.cpp
+    src/graphics/GraphicsDevice.h
+    src/input/InputController.cpp
+    src/input/InputController.h
+    src/model/RectangleModel.h
+    src/graphics/Renderer.cpp
+    src/graphics/Renderer.h
+    src/common/Win32Error.cpp
+    src/common/Win32Error.h
 )
 
 target_compile_features(TouchRevGUI PRIVATE cxx_std_20)
+
+target_include_directories(TouchRevGUI PRIVATE src)
 
 target_compile_definitions(TouchRevGUI PRIVATE
     UNICODE

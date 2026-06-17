@@ -1,0 +1,10 @@
+If:
+  PathExclude: poc/.*
+CompileFlags:
+  CompilationDatabase: build/ninja-debug
+
+---
+If:
+  PathMatch: poc/private_thumbnail_probe/.*
+CompileFlags:
+  CompilationDatabase: poc/private_thumbnail_probe/build/ninja-debug

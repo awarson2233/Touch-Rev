@@ -1,6 +1,6 @@
 #include "InputController.h"
 
-#include "Win32Error.h"
+#include "common/Win32Error.h"
 
 #include <windowsx.h>
 

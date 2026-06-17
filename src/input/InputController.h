@@ -1,7 +1,7 @@
 #pragma once
 
-#include "CoordinateSpace.h"
-#include "RectangleModel.h"
+#include "common/CoordinateSpace.h"
+#include "model/RectangleModel.h"
 
 #include <windows.h>
 

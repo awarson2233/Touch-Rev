@@ -2,7 +2,7 @@
 
 #include "CompositionHost.h"
 #include "GraphicsDevice.h"
-#include "Win32Error.h"
+#include "common/Win32Error.h"
 
 #include <d2d1_1helper.h>
 #include <dxgi1_2.h>

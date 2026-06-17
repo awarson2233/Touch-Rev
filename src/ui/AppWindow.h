@@ -2,12 +2,12 @@
 
 #include "AnimationSystem.h"
 #include "BackdropController.h"
-#include "CompositionHost.h"
-#include "CoordinateSpace.h"
-#include "GraphicsDevice.h"
-#include "InputController.h"
-#include "RectangleModel.h"
-#include "Renderer.h"
+#include "graphics/CompositionHost.h"
+#include "common/CoordinateSpace.h"
+#include "graphics/GraphicsDevice.h"
+#include "input/InputController.h"
+#include "model/RectangleModel.h"
+#include "graphics/Renderer.h"
 
 #include <windows.h>
 

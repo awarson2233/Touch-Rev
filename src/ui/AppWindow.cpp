@@ -1,6 +1,6 @@
 #include "AppWindow.h"
 
-#include "Win32Error.h"
+#include "common/Win32Error.h"
 
 #include <algorithm>
 #include <cmath>

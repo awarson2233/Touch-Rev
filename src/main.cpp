@@ -1,5 +1,5 @@
-#include "AppWindow.h"
-#include "Win32Error.h"
+#include "ui/AppWindow.h"
+#include "common/Win32Error.h"
 
 #include <windows.h>
 

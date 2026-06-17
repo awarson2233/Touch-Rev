@@ -1,7 +1,7 @@
 #include "CompositionHost.h"
 
 #include "GraphicsDevice.h"
-#include "Win32Error.h"
+#include "common/Win32Error.h"
 
 #include <algorithm>
 

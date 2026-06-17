@@ -1,6 +1,6 @@
 #pragma once
 
-#include "RectangleModel.h"
+#include "model/RectangleModel.h"
 
 #include <windows.h>
 #include <objbase.h>
