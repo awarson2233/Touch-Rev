@@ -1,13 +1,10 @@
 #pragma once
 
-#include "AnimationSystem.h"
+#include "AppSwitcherXamlView.h"
 #include "BackdropController.h"
-#include "graphics/CompositionHost.h"
+#include "ThinXamlAppSwitcherHost.h"
 #include "common/CoordinateSpace.h"
-#include "graphics/GraphicsDevice.h"
 #include "input/InputController.h"
-#include "model/RectangleModel.h"
-#include "graphics/Renderer.h"
 
 #include <windows.h>
 
@@ -25,48 +22,25 @@ private:
     void OnDestroy();
     void OnSize(UINT width, UINT height);
     void OnDpiChanged(WPARAM wParam, LPARAM lParam);
-    void ResizeRenderTargets(UINT width, UINT height, bool render);
     void OnPaint();
-    void OnAnimationTimer();
     void ApplyBackdropAndBackgroundMode();
-    void PaintBackdropBase();
-
-    HRESULT CreateGraphicsResources(bool initializeRectangle);
-    void ReleaseGraphicsResources();
-    void Render();
-    void RenderFrames(UINT frameCount);
-    void RequestRender();
-    void OnRenderFrame();
-    bool ShouldDriveRenderFrames() const;
-    bool DispatchPendingMessages(MSG& message, int& exitCode);
-    void HandleRenderFailure(HRESULT hr);
     void HandleInputResult(const InputController::Result& result);
-    void StopAnimationForDirectManipulation();
-    void StartReleaseAnimation();
-    void StartAnimationTimer();
-    void StopAnimationTimer();
-    SizeDip CurrentClientSizeDips() const;
+
+    bool CanStartDragFromPointer(WPARAM wParam) const;
+    bool CanStartDragFromMouse(LPARAM lParam) const;
+
     static UINT ClientWidthFromLParam(LPARAM lParam);
     static UINT ClientHeightFromLParam(LPARAM lParam);
-
-    static constexpr UINT_PTR kAnimationTimerId = 1;
-    static constexpr UINT kAnimationTimerMs = 16;
-    static constexpr DWORD kFallbackRenderFrameMs = 8;
+    static UINT GetClientWidth(HWND hwnd);
+    static UINT GetClientHeight(HWND hwnd);
 
     HWND hwnd_ = nullptr;
     HINSTANCE instance_ = nullptr;
     float dpi_ = 96.0f;
-    bool graphicsReady_ = false;
-    bool hasInitializedRectangle_ = false;
-    bool animationTimerActive_ = false;
-    bool renderRequested_ = false;
 
     BackdropController backdropController_;
-    GraphicsDevice graphicsDevice_;
-    CompositionHost compositionHost_;
     CoordinateSpace coordinates_;
-    Renderer renderer_;
-    RectangleModel rectangle_;
     InputController inputController_;
-    AnimationSystem animationSystem_;
+    ThinXamlAppSwitcherHost xamlHost_;
+    AppSwitcherXamlView appSwitcherXamlView_;
 };

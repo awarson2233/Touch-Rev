@@ -2,14 +2,15 @@
 #include "common/Win32Error.h"
 
 #include <windows.h>
+#include <roapi.h>
 
 int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 {
-    const HRESULT coInit = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    const bool shouldCoUninitialize = SUCCEEDED(coInit);
-    if (FAILED(coInit) && coInit != RPC_E_CHANGED_MODE)
+    const HRESULT roInit = RoInitialize(RO_INIT_SINGLETHREADED);
+    const bool shouldRoUninitialize = SUCCEEDED(roInit);
+    if (FAILED(roInit) && roInit != RPC_E_CHANGED_MODE)
     {
-        MessageBoxW(nullptr, L"COM initialization failed.", L"TouchRevGUI", MB_ICONERROR | MB_OK);
+        MessageBoxW(nullptr, L"WinRT initialization failed.", L"TouchRevGUI", MB_ICONERROR | MB_OK);
         return -1;
     }
 
@@ -22,18 +23,18 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     if (!app.Initialize(instance, showCommand))
     {
         MessageBoxW(nullptr, L"Failed to create the main window.", L"TouchRevGUI", MB_ICONERROR | MB_OK);
-        if (shouldCoUninitialize)
+        if (shouldRoUninitialize)
         {
-            CoUninitialize();
+            RoUninitialize();
         }
         return -1;
     }
 
     const int result = app.Run();
 
-    if (shouldCoUninitialize)
+    if (shouldRoUninitialize)
     {
-        CoUninitialize();
+        RoUninitialize();
     }
 
     return result;

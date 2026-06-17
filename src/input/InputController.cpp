@@ -51,7 +51,7 @@ void InputController::Initialize(HWND hwnd)
 
 void InputController::Cancel(HWND hwnd)
 {
-    if (pointerDragging_ || mouseDragging_ || touchDragging_)
+    if (GetCapture() == hwnd)
     {
         ReleaseCapture();
     }
@@ -64,18 +64,14 @@ void InputController::Cancel(HWND hwnd)
     dragOffsetX_ = 0.0f;
     dragOffsetY_ = 0.0f;
     ResetSamples();
-
-    if (GetCapture() == hwnd)
-    {
-        ReleaseCapture();
-    }
 }
 
 InputController::Result InputController::OnPointerDown(
     HWND hwnd,
     WPARAM wParam,
-    RectangleModel& rectangle,
-    const CoordinateSpace& coordinates)
+    const CoordinateSpace& coordinates,
+    PointDip currentPosition,
+    bool canStartDrag)
 {
     const UINT32 pointerId = GET_POINTERID_WPARAM(wParam);
     POINTER_INFO pointerInfo = {};
@@ -86,14 +82,10 @@ InputController::Result InputController::OnPointerDown(
     }
 
     const PointDip point = coordinates.ScreenPixelsToDips(hwnd, pointerInfo.ptPixelLocation);
-    return BeginDrag(hwnd, point, PointerCounterOrNow(pointerInfo), rectangle, true, pointerId);
+    return BeginDrag(hwnd, point, PointerCounterOrNow(pointerInfo), currentPosition, true, pointerId, canStartDrag);
 }
 
-InputController::Result InputController::OnPointerUpdate(
-    HWND hwnd,
-    WPARAM wParam,
-    RectangleModel& rectangle,
-    const CoordinateSpace& coordinates)
+InputController::Result InputController::OnPointerUpdate(HWND hwnd, WPARAM wParam, const CoordinateSpace& coordinates)
 {
     const UINT32 pointerId = GET_POINTERID_WPARAM(wParam);
     if (!pointerDragging_ || pointerId != activePointerId_)
@@ -101,7 +93,7 @@ InputController::Result InputController::OnPointerUpdate(
         return {.handled = true};
     }
 
-    return UpdateDragFromPointerHistory(hwnd, pointerId, rectangle, coordinates);
+    return UpdateDragFromPointerHistory(hwnd, pointerId, coordinates);
 }
 
 InputController::Result InputController::OnPointerUp(HWND hwnd, WPARAM wParam)
@@ -123,7 +115,7 @@ InputController::Result InputController::OnPointerCaptureChanged(WPARAM wParam)
         pointerDragging_ = false;
         activePointerId_ = 0;
         ResetSamples();
-        return {.handled = true, .dragEnded = true};
+        return {.handled = true, .dragEnded = true, .position = currentPosition_};
     }
 
     return {.handled = true};
@@ -132,8 +124,9 @@ InputController::Result InputController::OnPointerCaptureChanged(WPARAM wParam)
 InputController::Result InputController::OnMouseDown(
     HWND hwnd,
     LPARAM lParam,
-    RectangleModel& rectangle,
-    const CoordinateSpace& coordinates)
+    const CoordinateSpace& coordinates,
+    PointDip currentPosition,
+    bool canStartDrag)
 {
     if (pointerDragging_ || touchDragging_)
     {
@@ -142,14 +135,13 @@ InputController::Result InputController::OnMouseDown(
 
     POINT clientPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
     const PointDip point = coordinates.ClientPixelsToDips(clientPoint);
-    return BeginDrag(hwnd, point, QueryCounterValue(), rectangle, false, 0);
+    return BeginDrag(hwnd, point, QueryCounterValue(), currentPosition, false, 0, canStartDrag);
 }
 
 InputController::Result InputController::OnMouseMove(
     HWND,
     WPARAM wParam,
     LPARAM lParam,
-    RectangleModel& rectangle,
     const CoordinateSpace& coordinates)
 {
     if (!mouseDragging_ || (wParam & MK_LBUTTON) == 0)
@@ -158,7 +150,7 @@ InputController::Result InputController::OnMouseMove(
     }
 
     POINT clientPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
-    return UpdateDrag(coordinates.ClientPixelsToDips(clientPoint), QueryCounterValue(), rectangle);
+    return UpdateDrag(coordinates.ClientPixelsToDips(clientPoint), QueryCounterValue());
 }
 
 InputController::Result InputController::OnMouseUp(HWND hwnd)
@@ -175,13 +167,14 @@ InputController::Result InputController::OnTouch(
     HWND hwnd,
     WPARAM wParam,
     LPARAM lParam,
-    RectangleModel& rectangle,
-    const CoordinateSpace& coordinates)
+    const CoordinateSpace& coordinates,
+    PointDip currentPosition,
+    bool canStartDrag)
 {
     const UINT inputCount = LOWORD(wParam);
     std::vector<TOUCHINPUT> inputs(inputCount);
 
-    Result result{.handled = true};
+    Result result{.handled = true, .position = currentPosition_};
     if (inputCount == 0 ||
         !GetTouchInputInfo(reinterpret_cast<HTOUCHINPUT>(lParam), inputCount, inputs.data(), sizeof(TOUCHINPUT)))
     {
@@ -202,27 +195,27 @@ InputController::Result InputController::OnTouch(
 
         if ((input.dwFlags & TOUCHEVENTF_DOWN) != 0 && !touchDragging_)
         {
-            if (rectangle.HitTest(point))
+            const Result begin = BeginDrag(hwnd, point, sampleQpc, currentPosition, false, 0, canStartDrag);
+            if (begin.dragStarted)
             {
                 touchDragging_ = true;
+                mouseDragging_ = false;
                 activeTouchId_ = input.dwID;
-                dragOffsetX_ = point.x - rectangle.Left();
-                dragOffsetY_ = point.y - rectangle.Top();
-                ResetSamples();
-                RecordSample(point, sampleQpc);
-                SetCapture(hwnd);
                 result.dragStarted = true;
+                result.position = begin.position;
             }
         }
         else if ((input.dwFlags & TOUCHEVENTF_MOVE) != 0 && touchDragging_ && input.dwID == activeTouchId_)
         {
-            const Result update = UpdateDrag(point, sampleQpc, rectangle);
-            result.rectangleChanged = result.rectangleChanged || update.rectangleChanged;
+            const Result update = UpdateDrag(point, sampleQpc);
+            result.positionChanged = result.positionChanged || update.positionChanged;
+            result.position = update.position;
         }
         else if ((input.dwFlags & TOUCHEVENTF_UP) != 0 && touchDragging_ && input.dwID == activeTouchId_)
         {
             const Result end = EndDrag(hwnd);
             result.dragEnded = result.dragEnded || end.dragEnded;
+            result.position = end.position;
         }
     }
 
@@ -230,22 +223,21 @@ InputController::Result InputController::OnTouch(
     return result;
 }
 
-PointDip InputController::EvaluateVisualPosition(const RectangleModel& rectangle) const
+PointDip InputController::EvaluateVisualPosition() const
 {
     if (!IsDragging() || !latestSample_.valid)
     {
-        return rectangle.Position();
+        return currentPosition_;
     }
 
     const PointDip predictedPointer = PredictPointerPosition(QueryCounterValue());
-    const PointDip predictedPosition{
-        predictedPointer.x - dragOffsetX_,
-        predictedPointer.y - dragOffsetY_};
-    return rectangle.ClampPosition(predictedPosition);
+    return {predictedPointer.x - dragOffsetX_, predictedPointer.y - dragOffsetY_};
 }
 
-void InputController::RebaseActiveDrag(HWND hwnd, const RectangleModel& rectangle, const CoordinateSpace& coordinates)
+void InputController::RebaseActiveDrag(HWND hwnd, PointDip currentPosition, const CoordinateSpace& coordinates)
 {
+    currentPosition_ = currentPosition;
+
     PointDip point{};
     if (pointerDragging_ && activePointerId_ != 0)
     {
@@ -269,8 +261,8 @@ void InputController::RebaseActiveDrag(HWND hwnd, const RectangleModel& rectangl
         return;
     }
 
-    dragOffsetX_ = point.x - rectangle.Left();
-    dragOffsetY_ = point.y - rectangle.Top();
+    dragOffsetX_ = point.x - currentPosition_.x;
+    dragOffsetY_ = point.y - currentPosition_.y;
     ResetSamples();
     RecordSample(point, QueryCounterValue());
 }
@@ -291,14 +283,13 @@ bool InputController::TryGetPointerDip(HWND hwnd, UINT32 pointerId, const Coordi
 InputController::Result InputController::UpdateDragFromPointerHistory(
     HWND hwnd,
     UINT32 pointerId,
-    RectangleModel& rectangle,
     const CoordinateSpace& coordinates)
 {
     POINTER_INFO latestInfo = {};
     if (!GetPointerInfo(pointerId, &latestInfo))
     {
         DebugLog(L"GetPointerInfo failed before pointer history lookup.");
-        return {.handled = true};
+        return {.handled = true, .position = currentPosition_};
     }
 
     constexpr UINT32 kMaxHistorySamples = 128;
@@ -309,7 +300,7 @@ InputController::Result InputController::UpdateDragFromPointerHistory(
     if (!GetPointerInfoHistory(pointerId, &availableEntries, history.data()))
     {
         const PointDip point = coordinates.ScreenPixelsToDips(hwnd, latestInfo.ptPixelLocation);
-        return UpdateDrag(point, PointerCounterOrNow(latestInfo), rectangle);
+        return UpdateDrag(point, PointerCounterOrNow(latestInfo));
     }
 
     const UINT32 samplesToProcess = std::min<UINT32>(availableEntries, static_cast<UINT32>(history.size()));
@@ -318,24 +309,25 @@ InputController::Result InputController::UpdateDragFromPointerHistory(
     {
         const POINTER_INFO& sample = history[i - 1];
         const PointDip point = coordinates.ScreenPixelsToDips(hwnd, sample.ptPixelLocation);
-        const Result update = UpdateDrag(point, PointerCounterOrNow(sample), rectangle);
-        changed = changed || update.rectangleChanged;
+        const Result update = UpdateDrag(point, PointerCounterOrNow(sample));
+        changed = changed || update.positionChanged;
     }
 
-    return {.handled = true, .rectangleChanged = changed};
+    return {.handled = true, .positionChanged = changed, .position = currentPosition_};
 }
 
 InputController::Result InputController::BeginDrag(
     HWND hwnd,
     PointDip point,
     std::int64_t sampleQpc,
-    RectangleModel& rectangle,
+    PointDip currentPosition,
     bool pointerDrag,
-    UINT32 pointerId)
+    UINT32 pointerId,
+    bool canStartDrag)
 {
-    if (!rectangle.HitTest(point))
+    if (!canStartDrag)
     {
-        return {.handled = false};
+        return {.handled = false, .position = currentPosition};
     }
 
     pointerDragging_ = pointerDrag;
@@ -343,31 +335,30 @@ InputController::Result InputController::BeginDrag(
     touchDragging_ = false;
     activePointerId_ = pointerId;
     activeTouchId_ = 0;
-    dragOffsetX_ = point.x - rectangle.Left();
-    dragOffsetY_ = point.y - rectangle.Top();
+    currentPosition_ = currentPosition;
+    dragOffsetX_ = point.x - currentPosition_.x;
+    dragOffsetY_ = point.y - currentPosition_.y;
     ResetSamples();
     RecordSample(point, sampleQpc);
     SetCapture(hwnd);
 
-    return {.handled = true, .dragStarted = true};
+    return {.handled = true, .dragStarted = true, .position = currentPosition_};
 }
 
-InputController::Result InputController::UpdateDrag(PointDip point, std::int64_t sampleQpc, RectangleModel& rectangle)
+InputController::Result InputController::UpdateDrag(PointDip point, std::int64_t sampleQpc)
 {
     if (!pointerDragging_ && !mouseDragging_ && !touchDragging_)
     {
-        return {.handled = false};
+        return {.handled = false, .position = currentPosition_};
     }
 
     RecordSample(point, sampleQpc);
 
-    const PointDip nextPosition{point.x - dragOffsetX_, point.y - dragOffsetY_};
-    const PointDip oldPosition = rectangle.Position();
-    rectangle.MoveTo(nextPosition);
-    const PointDip newPosition = rectangle.Position();
+    const PointDip oldPosition = currentPosition_;
+    currentPosition_ = {point.x - dragOffsetX_, point.y - dragOffsetY_};
 
-    const bool changed = oldPosition.x != newPosition.x || oldPosition.y != newPosition.y;
-    return {.handled = true, .rectangleChanged = changed};
+    const bool changed = oldPosition.x != currentPosition_.x || oldPosition.y != currentPosition_.y;
+    return {.handled = true, .positionChanged = changed, .position = currentPosition_};
 }
 
 InputController::Result InputController::EndDrag(HWND hwnd)
@@ -384,7 +375,7 @@ InputController::Result InputController::EndDrag(HWND hwnd)
     activeTouchId_ = 0;
     ResetSamples();
 
-    return {.handled = true, .dragEnded = true};
+    return {.handled = true, .dragEnded = true, .position = currentPosition_};
 }
 
 void InputController::ResetSamples()

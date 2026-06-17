@@ -1,7 +1,6 @@
 #pragma once
 
 #include "common/CoordinateSpace.h"
-#include "model/RectangleModel.h"
 
 #include <windows.h>
 
@@ -13,28 +12,29 @@ public:
     struct Result
     {
         bool handled = false;
-        bool rectangleChanged = false;
+        bool positionChanged = false;
         bool dragStarted = false;
         bool dragEnded = false;
+        PointDip position{};
     };
 
     void Initialize(HWND hwnd);
     void Cancel(HWND hwnd);
 
-    Result OnPointerDown(HWND hwnd, WPARAM wParam, RectangleModel& rectangle, const CoordinateSpace& coordinates);
-    Result OnPointerUpdate(HWND hwnd, WPARAM wParam, RectangleModel& rectangle, const CoordinateSpace& coordinates);
+    Result OnPointerDown(HWND hwnd, WPARAM wParam, const CoordinateSpace& coordinates, PointDip currentPosition, bool canStartDrag);
+    Result OnPointerUpdate(HWND hwnd, WPARAM wParam, const CoordinateSpace& coordinates);
     Result OnPointerUp(HWND hwnd, WPARAM wParam);
     Result OnPointerCaptureChanged(WPARAM wParam);
 
-    Result OnMouseDown(HWND hwnd, LPARAM lParam, RectangleModel& rectangle, const CoordinateSpace& coordinates);
-    Result OnMouseMove(HWND hwnd, WPARAM wParam, LPARAM lParam, RectangleModel& rectangle, const CoordinateSpace& coordinates);
+    Result OnMouseDown(HWND hwnd, LPARAM lParam, const CoordinateSpace& coordinates, PointDip currentPosition, bool canStartDrag);
+    Result OnMouseMove(HWND hwnd, WPARAM wParam, LPARAM lParam, const CoordinateSpace& coordinates);
     Result OnMouseUp(HWND hwnd);
 
-    Result OnTouch(HWND hwnd, WPARAM wParam, LPARAM lParam, RectangleModel& rectangle, const CoordinateSpace& coordinates);
+    Result OnTouch(HWND hwnd, WPARAM wParam, LPARAM lParam, const CoordinateSpace& coordinates, PointDip currentPosition, bool canStartDrag);
 
     bool IsDragging() const { return pointerDragging_ || mouseDragging_ || touchDragging_; }
-    PointDip EvaluateVisualPosition(const RectangleModel& rectangle) const;
-    void RebaseActiveDrag(HWND hwnd, const RectangleModel& rectangle, const CoordinateSpace& coordinates);
+    PointDip EvaluateVisualPosition() const;
+    void RebaseActiveDrag(HWND hwnd, PointDip currentPosition, const CoordinateSpace& coordinates);
 
 private:
     struct PointerSample
@@ -46,9 +46,9 @@ private:
 
     static bool TryGetPointerDip(HWND hwnd, UINT32 pointerId, const CoordinateSpace& coordinates, PointDip& point);
 
-    Result UpdateDragFromPointerHistory(HWND hwnd, UINT32 pointerId, RectangleModel& rectangle, const CoordinateSpace& coordinates);
-    Result BeginDrag(HWND hwnd, PointDip point, std::int64_t sampleQpc, RectangleModel& rectangle, bool pointerDrag, UINT32 pointerId);
-    Result UpdateDrag(PointDip point, std::int64_t sampleQpc, RectangleModel& rectangle);
+    Result UpdateDragFromPointerHistory(HWND hwnd, UINT32 pointerId, const CoordinateSpace& coordinates);
+    Result BeginDrag(HWND hwnd, PointDip point, std::int64_t sampleQpc, PointDip currentPosition, bool pointerDrag, UINT32 pointerId, bool canStartDrag);
+    Result UpdateDrag(PointDip point, std::int64_t sampleQpc);
     Result EndDrag(HWND hwnd);
 
     void ResetSamples();
@@ -62,6 +62,7 @@ private:
     DWORD activeTouchId_ = 0;
     float dragOffsetX_ = 0.0f;
     float dragOffsetY_ = 0.0f;
+    PointDip currentPosition_{};
     PointerSample previousSample_{};
     PointerSample latestSample_{};
     float smoothedVelocityX_ = 0.0f;

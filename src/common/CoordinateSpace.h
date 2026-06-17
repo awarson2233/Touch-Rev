@@ -1,11 +1,21 @@
 #pragma once
 
-#include "model/RectangleModel.h"
-
 #include <windows.h>
 
 #include <algorithm>
 #include <cmath>
+
+struct PointDip
+{
+    float x = 0.0f;
+    float y = 0.0f;
+};
+
+struct SizeDip
+{
+    float width = 0.0f;
+    float height = 0.0f;
+};
 
 struct SizePx
 {
