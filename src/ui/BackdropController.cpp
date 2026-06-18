@@ -24,16 +24,28 @@ constexpr DWORD kDwmwaSystemBackdropType = DWMWA_SYSTEMBACKDROP_TYPE;
 constexpr DWORD kDwmwaSystemBackdropType = 38;
 #endif
 
-#if defined(DWMWCP_ROUND)
-constexpr int kDwmwcpRound = DWMWCP_ROUND;
+#if defined(DWMWCP_DONOTROUND)
+constexpr int kDwmwcpDoNotRound = DWMWCP_DONOTROUND;
 #else
-constexpr int kDwmwcpRound = 2;
+constexpr int kDwmwcpDoNotRound = 1;
+#endif
+
+#if defined(DWMWA_BORDER_COLOR)
+constexpr DWORD kDwmwaBorderColor = DWMWA_BORDER_COLOR;
+#else
+constexpr DWORD kDwmwaBorderColor = 34;
 #endif
 
 #if defined(DWMSBT_NONE)
 constexpr int kDwmsbtNone = DWMSBT_NONE;
 #else
 constexpr int kDwmsbtNone = 1;
+#endif
+
+#if defined(DWMWA_COLOR_NONE)
+constexpr COLORREF kDwmColorNone = DWMWA_COLOR_NONE;
+#else
+constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
 #endif
 }
 
@@ -68,7 +80,7 @@ BackdropApplyResult BackdropController::Apply(HWND hwnd, bool useDarkMode) const
         DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)", result.darkModeHr);
     }
 
-    int cornerPreference = kDwmwcpRound;
+    int cornerPreference = kDwmwcpDoNotRound;
     result.cornerHr = DwmSetWindowAttribute(
         hwnd,
         kDwmwaWindowCornerPreference,
@@ -77,6 +89,17 @@ BackdropApplyResult BackdropController::Apply(HWND hwnd, bool useDarkMode) const
     if (FAILED(result.cornerHr))
     {
         DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE)", result.cornerHr);
+    }
+
+    COLORREF borderColor = kDwmColorNone;
+    const HRESULT borderColorHr = DwmSetWindowAttribute(
+        hwnd,
+        kDwmwaBorderColor,
+        &borderColor,
+        sizeof(borderColor));
+    if (FAILED(borderColorHr))
+    {
+        DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_BORDER_COLOR)", borderColorHr);
     }
 
     int backdrop = kDwmsbtNone;
@@ -90,12 +113,7 @@ BackdropApplyResult BackdropController::Apply(HWND hwnd, bool useDarkMode) const
         DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE)", result.systemBackdropHr);
     }
 
-    const MARGINS fullClientArea{-1, -1, -1, -1};
-    result.extendFrameHr = DwmExtendFrameIntoClientArea(hwnd, &fullClientArea);
-    if (FAILED(result.extendFrameHr))
-    {
-        DebugLogHResult(L"DwmExtendFrameIntoClientArea", result.extendFrameHr);
-    }
+    result.extendFrameHr = S_OK;
 
     result.systemBackdropApplied = SUCCEEDED(result.systemBackdropHr);
     return result;

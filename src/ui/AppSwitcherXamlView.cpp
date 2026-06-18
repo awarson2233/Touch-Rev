@@ -121,11 +121,6 @@ std::vector<AppSwitcherWindowItem> EnumerateSwitcherWindows(HWND excludeHwnd)
     return state.windows;
 }
 
-double ResolveActualSize(double actualSize, double fallbackSize)
-{
-    return actualSize > 1.0 ? actualSize : std::max(1.0, fallbackSize);
-}
-
 void ApplyContentClip(winrt::Windows::UI::Xaml::FrameworkElement const& element, double width, double height)
 {
     auto clip = winrt::Windows::UI::Xaml::Media::RectangleGeometry();
@@ -532,44 +527,10 @@ void AppSwitcherXamlView::EnsureItemCount(size_t count)
 
 void AppSwitcherXamlView::UpdateVisibleBoundsAndPositions()
 {
-    constexpr double bleedDip = 16.0;
-    double left = static_cast<double>(contentOriginDip_.x);
-    double top = static_cast<double>(contentOriginDip_.y);
-    double right = left + static_cast<double>(contentBoundsDip_.width);
-    double bottom = top + static_cast<double>(contentBoundsDip_.height);
-
-    for (const auto& item : items_)
-    {
-        if (!item.visible)
-        {
-            continue;
-        }
-
-        left = std::min(left, static_cast<double>(item.layoutPosition.x));
-        top = std::min(top, static_cast<double>(item.layoutPosition.y));
-        right = std::max(right, static_cast<double>(item.layoutPosition.x + item.layoutSize.width));
-        bottom = std::max(bottom, static_cast<double>(item.layoutPosition.y + item.layoutSize.height));
-    }
-
-    if (right <= left || bottom <= top)
-    {
-        left = 0.0;
-        top = 0.0;
-        right = std::max(1.0, static_cast<double>(clientSizeDip_.width));
-        bottom = std::max(1.0, static_cast<double>(clientSizeDip_.height));
-    }
-    else
-    {
-        left = std::max(0.0, left - bleedDip);
-        top = std::max(0.0, top - bleedDip);
-        right = std::min(std::max(1.0, static_cast<double>(clientSizeDip_.width)), right + bleedDip);
-        bottom = std::min(std::max(1.0, static_cast<double>(clientSizeDip_.height)), bottom + bleedDip);
-    }
-
-    visibleOriginDip_ = {static_cast<float>(left), static_cast<float>(top)};
+    visibleOriginDip_ = {};
     visibleBoundsDip_ = {
-        static_cast<float>(std::max(1.0, right - left)),
-        static_cast<float>(std::max(1.0, bottom - top))};
+        std::max(1.0f, clientSizeDip_.width),
+        std::max(1.0f, clientSizeDip_.height)};
 
     if (root_)
     {
@@ -585,8 +546,8 @@ void AppSwitcherXamlView::UpdateVisibleBoundsAndPositions()
 
     if (appSwitcherContainer_)
     {
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(appSwitcherContainer_, contentOriginDip_.x - visibleOriginDip_.x);
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(appSwitcherContainer_, contentOriginDip_.y - visibleOriginDip_.y);
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(appSwitcherContainer_, contentOriginDip_.x);
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(appSwitcherContainer_, contentOriginDip_.y);
         appSwitcherContainer_.Width(contentBoundsDip_.width);
         appSwitcherContainer_.Height(contentBoundsDip_.height);
     }
@@ -598,8 +559,8 @@ void AppSwitcherXamlView::UpdateVisibleBoundsAndPositions()
             continue;
         }
 
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(item.root, item.layoutPosition.x - visibleOriginDip_.x);
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(item.root, item.layoutPosition.y - visibleOriginDip_.y);
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(item.root, item.layoutPosition.x);
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(item.root, item.layoutPosition.y);
     }
 
     if (focusBorder_)
@@ -610,10 +571,10 @@ void AppSwitcherXamlView::UpdateVisibleBoundsAndPositions()
             constexpr double inflationDip = 10.0;
             winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(
                 focusBorder_,
-                firstVisible->layoutPosition.x - visibleOriginDip_.x - inflationDip);
+                firstVisible->layoutPosition.x - inflationDip);
             winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(
                 focusBorder_,
-                firstVisible->layoutPosition.y - visibleOriginDip_.y - inflationDip);
+                firstVisible->layoutPosition.y - inflationDip);
             focusBorder_.Width(firstVisible->layoutSize.width + inflationDip * 2.0);
             focusBorder_.Height(firstVisible->layoutSize.height + inflationDip * 2.0);
             focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
@@ -718,10 +679,11 @@ void AppSwitcherXamlView::ApplyLayout(
             item.root.UpdateLayout();
             item.thumbnailHost.UpdateLayout();
 
-            const double fallbackThumbnailWidth = std::max(1.0, w - 2.0);
-            const double fallbackThumbnailHeight = std::max(1.0, h * 0.82 - 2.0);
-            const double thumbnailWidth = ResolveActualSize(item.thumbnailHost.ActualWidth(), fallbackThumbnailWidth);
-            const double thumbnailHeight = ResolveActualSize(item.thumbnailHost.ActualHeight(), fallbackThumbnailHeight);
+            constexpr double titleRowWeight = 1.8;
+            constexpr double contentRowWeight = 8.2;
+            constexpr double totalRowWeight = titleRowWeight + contentRowWeight;
+            const double thumbnailWidth = std::max(1.0, w);
+            const double thumbnailHeight = std::max(1.0, h * contentRowWeight / totalRowWeight);
             ApplyContentClip(item.thumbnailHost, thumbnailWidth, thumbnailHeight);
 
             const bool needsThumbnail = !item.thumbnailSlot || ShouldRecreateThumbnail(

@@ -42,7 +42,7 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
     }
 
     constexpr DWORD style = WS_POPUP | WS_CLIPCHILDREN;
-    constexpr DWORD exStyle = 0;
+    constexpr DWORD exStyle = WS_EX_TOOLWINDOW;
     MONITORINFO monitorInfo{};
     monitorInfo.cbSize = sizeof(monitorInfo);
     HMONITOR monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
@@ -227,10 +227,6 @@ HRESULT AppWindow::OnCreate()
         return E_FAIL;
     }
 
-    appSwitcherXamlView_.SetBoundsChangedCallback([this]() {
-        UpdateTransparentRegion();
-    });
-
     if (!appSwitcherXamlView_.Initialize(hwnd_, xamlHost_))
     {
         DebugLog(L"XAML AppSwitcher view initialization failed.");
@@ -315,40 +311,10 @@ void AppWindow::UpdateTransparentRegion()
         return;
     }
 
-    RECT visible = appSwitcherXamlView_.VisibleBoundsPx();
-    const int visibleWidth = std::max<int>(1, static_cast<int>(visible.right - visible.left));
-    const int visibleHeight = std::max<int>(1, static_cast<int>(visible.bottom - visible.top));
-    xamlHost_.SetBounds(
-        visible.left,
-        visible.top,
-        static_cast<UINT>(visibleWidth),
-        static_cast<UINT>(visibleHeight));
-
-    POINT clientOrigin{0, 0};
-    ClientToScreen(hwnd_, &clientOrigin);
-
-    RECT windowRect{};
-    GetWindowRect(hwnd_, &windowRect);
-    const int offsetX = clientOrigin.x - windowRect.left;
-    const int offsetY = clientOrigin.y - windowRect.top;
-
-    constexpr int bleedPx = 2;
-    HRGN region = CreateRectRgn(
-        visible.left + offsetX - bleedPx,
-        visible.top + offsetY - bleedPx,
-        visible.right + offsetX + bleedPx,
-        visible.bottom + offsetY + bleedPx);
-    if (region == nullptr)
-    {
-        DebugLogHResult(L"CreateRectRgn", HResultFromLastError());
-        return;
-    }
-
-    if (SetWindowRgn(hwnd_, region, TRUE) == 0)
-    {
-        DebugLogHResult(L"SetWindowRgn", HResultFromLastError());
-        DeleteObject(region);
-    }
+    const UINT clientWidth = GetClientWidth(hwnd_);
+    const UINT clientHeight = GetClientHeight(hwnd_);
+    xamlHost_.Resize(clientWidth, clientHeight);
+    SetWindowRgn(hwnd_, nullptr, TRUE);
 }
 
 void AppWindow::HandleInputResult(const InputController::Result& result)
