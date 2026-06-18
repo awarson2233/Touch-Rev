@@ -27,7 +27,12 @@ private:
     void ApplyBackdropAndBackgroundMode();
     void RefreshTheme();
     void UpdateTransparentRegion();
+    void Hide();
+    void ActivateWindow(HWND targetHwnd);
+    void ExpandWindowAroundPoint(HWND targetHwnd, POINT centerPoint);
     void HandleInputResult(const InputController::Result& result);
+    HMONITOR ResolveTargetMonitor() const;
+    MONITORINFO LoadMonitorInfo(HMONITOR monitor) const;
 
     bool CanStartDragFromPointer(WPARAM wParam) const;
     bool CanStartDragFromMouse(LPARAM lParam) const;
@@ -39,6 +44,9 @@ private:
 
     HWND hwnd_ = nullptr;
     HINSTANCE instance_ = nullptr;
+    HMONITOR targetMonitor_ = nullptr;
+    RECT targetMonitorRectPx_{};
+    RECT targetWorkAreaPx_{};
     float dpi_ = 96.0f;
 
     BackdropController backdropController_;

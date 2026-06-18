@@ -47,7 +47,7 @@ AppSwitcherLayoutResult AppSwitcherLayoutEngine::Calculate(
     double sn = 0.16;
     if (!isPortrait)
     {
-        sn = count <= 2 ? 0.30 : count <= 5 ? 0.24 : count <= 10 ? 0.20 : 0.16;
+        sn = count <= 2 ? 0.30 : count <= 5 ? 0.24 : count <= 10 ? 0.18 : 0.16;
     }
     else
     {
@@ -76,7 +76,7 @@ AppSwitcherLayoutResult AppSwitcherLayoutEngine::Calculate(
         if (!isPortrait)
         {
             const double thumbHeight = static_cast<double>(workHeight) * sn;
-            const double titleHeight = thumbHeight * (1.8 / 8.2);
+            const double titleHeight = thumbHeight * (TitleRowWeight / ContentRowWeight);
             itemHeight = thumbHeight + titleHeight;
             itemWidth = thumbHeight * aspect;
         }
@@ -110,7 +110,7 @@ AppSwitcherLayoutResult AppSwitcherLayoutEngine::Calculate(
         itemSizes.end(),
         [](const SizeDouble& lhs, const SizeDouble& rhs) { return lhs.width < rhs.width; });
     const double screenAspect = static_cast<double>(workWidth) / static_cast<double>(workHeight);
-    const double idealWidth = std::sqrt(totalArea * screenAspect * 2.2);
+    const double idealWidth = std::sqrt(totalArea * screenAspect * 2.0);
     const double wrappingWidth = std::min(
         static_cast<double>(workWidth) * 0.95,
         std::max(maxWidthIt != itemSizes.end() ? maxWidthIt->width : 1.0, idealWidth));

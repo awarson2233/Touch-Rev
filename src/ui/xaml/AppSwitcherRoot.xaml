@@ -17,11 +17,11 @@
             x:Name="FocusBorder"
             BorderBrush="#FF4CC2FF"
             BorderThickness="4"
-            Canvas.ZIndex="100"
+            Canvas.ZIndex="1"
             CornerRadius="20"
             IsHitTestVisible="False"
             Visibility="Collapsed"
-            Background="#224CC2FF" />
+            Background="Transparent" />
     </Canvas>
 
     <Grid

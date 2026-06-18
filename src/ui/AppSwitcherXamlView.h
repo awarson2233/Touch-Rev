@@ -31,18 +31,25 @@ public:
     PointDip DragPosition() const { return dragPosition_; }
     void SetDragPosition(PointDip position);
     void ApplyTheme(const AppSwitcherPalette& palette);
+    void SetTargetMonitor(HMONITOR monitor);
     void SetBoundsChangedCallback(std::function<void()> callback);
+    void SetMissedInputCallback(std::function<void()> callback);
+    void SetItemActivatedCallback(std::function<void(HWND)> callback);
+    void SetItemDragReleasedCallback(std::function<void(HWND, POINT)> callback);
 
 private:
     struct ItemView
     {
         winrt::Windows::UI::Xaml::FrameworkElement root{nullptr};
+        winrt::Windows::UI::Xaml::Media::CompositeTransform transform{nullptr};
+        winrt::Windows::UI::Xaml::Controls::Grid layoutGrid{nullptr};
         winrt::Windows::UI::Xaml::Controls::Border mainCard{nullptr};
         winrt::Windows::UI::Xaml::Controls::Border titleBorder{nullptr};
         winrt::Windows::UI::Xaml::Controls::TextBlock title{nullptr};
         winrt::Windows::UI::Xaml::Controls::TextBlock defaultIcon{nullptr};
         winrt::Windows::UI::Xaml::Controls::Button closeButton{nullptr};
         winrt::Windows::UI::Xaml::Controls::Border thumbnailHost{nullptr};
+        winrt::Windows::UI::Xaml::Controls::Border pressOverlay{nullptr};
         HWND hwnd = nullptr;
         PointDip layoutPosition{};
         SizeDip layoutSize{};
@@ -50,6 +57,9 @@ private:
         HRESULT thumbnailError = S_OK;
         bool thumbnailFailed = false;
         bool visible = false;
+        bool hovered = false;
+        bool pressed = false;
+        bool grabbed = false;
     };
 
     bool LoadRoot();
@@ -59,6 +69,12 @@ private:
     void AttachPointerHandlers();
     void UpdateVisibleBoundsAndPositions();
     void ApplyItemTheme(ItemView& item);
+    void ApplyItemRowWeights(ItemView& item);
+    void ApplyItemInteractionState(ItemView& item);
+    void ResetInteractionState();
+    void BeginGrab(size_t itemIndex);
+    void FinishPressedItem(size_t itemIndex, PointDip releasePoint);
+    POINT DipPointToScreenPixel(PointDip point) const;
     void ClearItemThumbnail(ItemView& item);
     void ResetItem(ItemView& item);
 
@@ -66,6 +82,7 @@ private:
     static std::wstring ModuleRelativePath(const std::wstring& relativePath);
 
     HWND hwnd_ = nullptr;
+    HMONITOR targetMonitor_ = nullptr;
     ThinXamlAppSwitcherHost* host_ = nullptr;
     bool initialized_ = false;
 
@@ -84,11 +101,17 @@ private:
     SizeDip visibleBoundsDip_{};
     SizeDip clientSizeDip_{};
     bool xamlPointerDragging_ = false;
+    bool xamlPointerPressed_ = false;
     size_t activeDragItemIndex_ = static_cast<size_t>(-1);
+    size_t pressedItemIndex_ = static_cast<size_t>(-1);
+    PointDip pressPointDip_{};
     double xamlDragOffsetX_ = 0.0;
     double xamlDragOffsetY_ = 0.0;
     double currentDpiScale_ = 1.0;
     std::function<void()> boundsChangedCallback_;
+    std::function<void()> missedInputCallback_;
+    std::function<void(HWND)> itemActivatedCallback_;
+    std::function<void(HWND, POINT)> itemDragReleasedCallback_;
     AppSwitcherPalette palette_ = PaletteForTheme(AppThemeMode::Dark);
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
 };

@@ -3,6 +3,7 @@
 #include "common/Win32Error.h"
 
 #include <algorithm>
+#include <vector>
 #include <windowsx.h>
 
 namespace
@@ -43,15 +44,12 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
 
     constexpr DWORD style = WS_POPUP | WS_CLIPCHILDREN;
     constexpr DWORD exStyle = WS_EX_TOOLWINDOW;
-    MONITORINFO monitorInfo{};
-    monitorInfo.cbSize = sizeof(monitorInfo);
-    HMONITOR monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
-    if (!GetMonitorInfoW(monitor, &monitorInfo))
-    {
-        monitorInfo.rcMonitor = {0, 0, 1000, 700};
-    }
+    targetMonitor_ = ResolveTargetMonitor();
+    const MONITORINFO monitorInfo = LoadMonitorInfo(targetMonitor_);
+    targetMonitorRectPx_ = monitorInfo.rcMonitor;
+    targetWorkAreaPx_ = monitorInfo.rcWork;
 
-    const RECT windowRect = monitorInfo.rcMonitor;
+    const RECT windowRect = targetMonitorRectPx_;
 
     hwnd_ = CreateWindowExW(
         exStyle,
@@ -148,13 +146,22 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_POINTERDOWN:
+    {
+        const bool canStartDrag = CanStartDragFromPointer(wParam);
+        if (!canStartDrag)
+        {
+            Hide();
+            return 0;
+        }
+
         HandleInputResult(inputController_.OnPointerDown(
             hwnd_,
             wParam,
             coordinates_,
             appSwitcherXamlView_.DragPosition(),
-            CanStartDragFromPointer(wParam)));
+            canStartDrag));
         return 0;
+    }
 
     case WM_POINTERUPDATE:
         HandleInputResult(inputController_.OnPointerUpdate(hwnd_, wParam, coordinates_));
@@ -169,6 +176,29 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case WM_TOUCH:
+    {
+        const UINT inputCount = LOWORD(wParam);
+        std::vector<TOUCHINPUT> inputs(inputCount);
+        if (inputCount > 0 &&
+            GetTouchInputInfo(reinterpret_cast<HTOUCHINPUT>(lParam), inputCount, inputs.data(), sizeof(TOUCHINPUT)))
+        {
+            for (const TOUCHINPUT& input : inputs)
+            {
+                if ((input.dwFlags & TOUCHEVENTF_DOWN) == 0)
+                {
+                    continue;
+                }
+
+                POINT screenPoint{TOUCH_COORD_TO_PIXEL(input.x), TOUCH_COORD_TO_PIXEL(input.y)};
+                if (!appSwitcherXamlView_.HitTest(coordinates_.ScreenPixelsToDips(hwnd_, screenPoint)))
+                {
+                    CloseTouchInputHandle(reinterpret_cast<HTOUCHINPUT>(lParam));
+                    Hide();
+                    return 0;
+                }
+            }
+        }
+
         HandleInputResult(inputController_.OnTouch(
             hwnd_,
             wParam,
@@ -177,15 +207,25 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             appSwitcherXamlView_.DragPosition(),
             true));
         return 0;
+    }
 
     case WM_LBUTTONDOWN:
+    {
+        const bool canStartDrag = CanStartDragFromMouse(lParam);
+        if (!canStartDrag)
+        {
+            Hide();
+            return 0;
+        }
+
         HandleInputResult(inputController_.OnMouseDown(
             hwnd_,
             lParam,
             coordinates_,
             appSwitcherXamlView_.DragPosition(),
-            CanStartDragFromMouse(lParam)));
+            canStartDrag));
         return 0;
+    }
 
     case WM_MOUSEMOVE:
         HandleInputResult(inputController_.OnMouseMove(hwnd_, wParam, lParam, coordinates_));
@@ -226,6 +266,19 @@ HRESULT AppWindow::OnCreate()
         DebugLog(L"XAML AppSwitcher host initialization failed.");
         return E_FAIL;
     }
+
+    appSwitcherXamlView_.SetTargetMonitor(targetMonitor_);
+    appSwitcherXamlView_.SetMissedInputCallback([this]() {
+        Hide();
+    });
+    appSwitcherXamlView_.SetItemActivatedCallback([this](HWND targetHwnd) {
+        ActivateWindow(targetHwnd);
+        Hide();
+    });
+    appSwitcherXamlView_.SetItemDragReleasedCallback([this](HWND targetHwnd, POINT releasePoint) {
+        ExpandWindowAroundPoint(targetHwnd, releasePoint);
+        Hide();
+    });
 
     if (!appSwitcherXamlView_.Initialize(hwnd_, xamlHost_))
     {
@@ -317,12 +370,130 @@ void AppWindow::UpdateTransparentRegion()
     SetWindowRgn(hwnd_, nullptr, TRUE);
 }
 
+void AppWindow::Hide()
+{
+    if (hwnd_)
+    {
+        DestroyWindow(hwnd_);
+    }
+}
+
+void AppWindow::ActivateWindow(HWND targetHwnd)
+{
+    if (IsWindow(targetHwnd))
+    {
+        SetForegroundWindow(targetHwnd);
+    }
+}
+
+void AppWindow::ExpandWindowAroundPoint(HWND targetHwnd, POINT centerPoint)
+{
+    if (!IsWindow(targetHwnd))
+    {
+        return;
+    }
+
+    RECT currentRect{};
+    if (!GetWindowRect(targetHwnd, &currentRect))
+    {
+        ActivateWindow(targetHwnd);
+        return;
+    }
+
+    int width = std::max<int>(160, currentRect.right - currentRect.left);
+    int height = std::max<int>(120, currentRect.bottom - currentRect.top);
+
+    WINDOWPLACEMENT placement{};
+    placement.length = sizeof(placement);
+    if (GetWindowPlacement(targetHwnd, &placement))
+    {
+        const int normalWidth = placement.rcNormalPosition.right - placement.rcNormalPosition.left;
+        const int normalHeight = placement.rcNormalPosition.bottom - placement.rcNormalPosition.top;
+        if (normalWidth > 0 && normalHeight > 0)
+        {
+            width = std::max<int>(160, normalWidth);
+            height = std::max<int>(120, normalHeight);
+        }
+
+        if (placement.showCmd == SW_SHOWMAXIMIZED || placement.showCmd == SW_SHOWMINIMIZED)
+        {
+            ShowWindow(targetHwnd, SW_RESTORE);
+        }
+    }
+
+    MONITORINFO monitorInfo{};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+    HMONITOR monitor = MonitorFromPoint(centerPoint, MONITOR_DEFAULTTONEAREST);
+    if (!monitor || !GetMonitorInfoW(monitor, &monitorInfo))
+    {
+        monitorInfo.rcWork = targetWorkAreaPx_;
+    }
+
+    const RECT workArea = monitorInfo.rcWork;
+    const int workWidth = std::max<int>(1, workArea.right - workArea.left);
+    const int workHeight = std::max<int>(1, workArea.bottom - workArea.top);
+    width = std::min(width, workWidth);
+    height = std::min(height, workHeight);
+
+    int left = centerPoint.x - width / 2;
+    int top = centerPoint.y - height / 2;
+    left = std::clamp<int>(left, static_cast<int>(workArea.left), static_cast<int>(workArea.right) - width);
+    top = std::clamp<int>(top, static_cast<int>(workArea.top), static_cast<int>(workArea.bottom) - height);
+
+    SetWindowPos(
+        targetHwnd,
+        HWND_TOP,
+        left,
+        top,
+        width,
+        height,
+        SWP_SHOWWINDOW);
+    ActivateWindow(targetHwnd);
+}
+
 void AppWindow::HandleInputResult(const InputController::Result& result)
 {
     if (result.positionChanged || result.dragEnded)
     {
         appSwitcherXamlView_.SetDragPosition(result.position);
     }
+}
+
+HMONITOR AppWindow::ResolveTargetMonitor() const
+{
+    POINT cursor{};
+    if (GetCursorPos(&cursor))
+    {
+        HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
+        if (monitor)
+        {
+            return monitor;
+        }
+    }
+
+    HWND foreground = GetForegroundWindow();
+    if (foreground)
+    {
+        HMONITOR monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST);
+        if (monitor)
+        {
+            return monitor;
+        }
+    }
+
+    return MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+}
+
+MONITORINFO AppWindow::LoadMonitorInfo(HMONITOR monitor) const
+{
+    MONITORINFO monitorInfo{};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+    if (!monitor || !GetMonitorInfoW(monitor, &monitorInfo))
+    {
+        monitorInfo.rcMonitor = {0, 0, 1000, 700};
+        monitorInfo.rcWork = monitorInfo.rcMonitor;
+    }
+    return monitorInfo;
 }
 
 bool AppWindow::CanStartDragFromPointer(WPARAM wParam) const

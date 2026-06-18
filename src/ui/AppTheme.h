@@ -12,11 +12,16 @@ struct AppSwitcherPalette
     double containerAcrylicTintOpacity = 0.0;
     winrt::Windows::UI::Color cardBackground{};
     winrt::Windows::UI::Color titleBackground{};
+    winrt::Windows::UI::Color titleHoverBackground{};
+    winrt::Windows::UI::Color titlePressedBackground{};
+    winrt::Windows::UI::Color titleGrabbedBackground{};
     winrt::Windows::UI::Color contentBackground{};
     winrt::Windows::UI::Color primaryText{};
     winrt::Windows::UI::Color secondaryText{};
     winrt::Windows::UI::Color iconText{};
     winrt::Windows::UI::Color buttonText{};
+    winrt::Windows::UI::Color closeButtonHoverBackground{};
+    winrt::Windows::UI::Color closeButtonHoverText{};
     winrt::Windows::UI::Color focusBorder{};
     winrt::Windows::UI::Color focusFill{};
 };

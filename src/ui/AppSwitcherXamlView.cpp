@@ -40,6 +40,70 @@ int RectHeight(const RECT& rect)
     return rect.bottom - rect.top;
 }
 
+LONG RectIntersectionArea(const RECT& a, const RECT& b)
+{
+    const LONG left = std::max(a.left, b.left);
+    const LONG top = std::max(a.top, b.top);
+    const LONG right = std::min(a.right, b.right);
+    const LONG bottom = std::min(a.bottom, b.bottom);
+    if (right <= left || bottom <= top)
+    {
+        return 0;
+    }
+    return (right - left) * (bottom - top);
+}
+
+RECT MonitorRect(HMONITOR monitor)
+{
+    MONITORINFO monitorInfo{};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+    if (!monitor || !GetMonitorInfoW(monitor, &monitorInfo))
+    {
+        return {0, 0, 0, 0};
+    }
+    return monitorInfo.rcMonitor;
+}
+
+bool WindowBelongsToMonitor(const RECT& windowRect, HMONITOR targetMonitor)
+{
+    if (!targetMonitor)
+    {
+        return true;
+    }
+
+    const RECT targetRect = MonitorRect(targetMonitor);
+    const LONG targetArea = RectIntersectionArea(windowRect, targetRect);
+    if (targetArea <= 0)
+    {
+        return false;
+    }
+
+    struct EnumState
+    {
+        RECT windowRect{};
+        HMONITOR targetMonitor = nullptr;
+        LONG bestArea = 0;
+        HMONITOR bestMonitor = nullptr;
+    } state{windowRect, targetMonitor};
+
+    EnumDisplayMonitors(
+        nullptr,
+        nullptr,
+        [](HMONITOR monitor, HDC, LPRECT monitorRect, LPARAM param) -> BOOL {
+            auto& state = *reinterpret_cast<EnumState*>(param);
+            const LONG area = RectIntersectionArea(state.windowRect, *monitorRect);
+            if (area > state.bestArea)
+            {
+                state.bestArea = area;
+                state.bestMonitor = monitor;
+            }
+            return TRUE;
+        },
+        reinterpret_cast<LPARAM>(&state));
+
+    return state.bestMonitor == targetMonitor;
+}
+
 std::wstring GetWindowDisplayTitle(HWND hwnd)
 {
     wchar_t title[256]{};
@@ -91,13 +155,14 @@ bool IsAltTabLikeWindow(HWND hwnd)
     return rect.right - rect.left >= 80 && rect.bottom - rect.top >= 60;
 }
 
-std::vector<AppSwitcherWindowItem> EnumerateSwitcherWindows(HWND excludeHwnd)
+std::vector<AppSwitcherWindowItem> EnumerateSwitcherWindows(HWND excludeHwnd, HMONITOR targetMonitor)
 {
     struct EnumState
     {
         HWND exclude = nullptr;
+        HMONITOR targetMonitor = nullptr;
         std::vector<AppSwitcherWindowItem> windows;
-    } state{excludeHwnd};
+    } state{excludeHwnd, targetMonitor};
 
     EnumWindows(
         [](HWND hwnd, LPARAM param) -> BOOL {
@@ -109,6 +174,11 @@ std::vector<AppSwitcherWindowItem> EnumerateSwitcherWindows(HWND excludeHwnd)
 
             RECT rect{};
             GetWindowRect(hwnd, &rect);
+            if (!WindowBelongsToMonitor(rect, state.targetMonitor))
+            {
+                return TRUE;
+            }
+
             state.windows.push_back({
                 hwnd,
                 static_cast<double>(std::max<LONG>(1, rect.right - rect.left)),
@@ -126,6 +196,13 @@ void ApplyContentClip(winrt::Windows::UI::Xaml::FrameworkElement const& element,
     auto clip = winrt::Windows::UI::Xaml::Media::RectangleGeometry();
     clip.Rect({0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)});
     element.Clip(clip);
+}
+
+double Distance(PointDip a, PointDip b)
+{
+    const double dx = static_cast<double>(a.x - b.x);
+    const double dy = static_cast<double>(a.y - b.y);
+    return std::sqrt(dx * dx + dy * dy);
 }
 
 bool ShouldRecreateThumbnail(
@@ -250,8 +327,27 @@ void AppSwitcherXamlView::Resize(UINT widthPx, UINT heightPx, double scale)
 
 bool AppSwitcherXamlView::HitTest(PointDip point) const
 {
-    return initialized_ && point.x >= 0.0f && point.y >= 0.0f &&
-           point.x <= clientSizeDip_.width && point.y <= clientSizeDip_.height;
+    if (!initialized_)
+    {
+        return false;
+    }
+
+    for (const auto& item : items_)
+    {
+        if (!item.visible)
+        {
+            continue;
+        }
+
+        if (point.x >= item.layoutPosition.x && point.y >= item.layoutPosition.y &&
+            point.x <= item.layoutPosition.x + item.layoutSize.width &&
+            point.y <= item.layoutPosition.y + item.layoutSize.height)
+        {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 RECT AppSwitcherXamlView::VisibleBoundsPx() const
@@ -279,9 +375,29 @@ void AppSwitcherXamlView::SetDragPosition(PointDip position)
     dragPosition_ = position;
 }
 
+void AppSwitcherXamlView::SetTargetMonitor(HMONITOR monitor)
+{
+    targetMonitor_ = monitor;
+}
+
 void AppSwitcherXamlView::SetBoundsChangedCallback(std::function<void()> callback)
 {
     boundsChangedCallback_ = std::move(callback);
+}
+
+void AppSwitcherXamlView::SetMissedInputCallback(std::function<void()> callback)
+{
+    missedInputCallback_ = std::move(callback);
+}
+
+void AppSwitcherXamlView::SetItemActivatedCallback(std::function<void(HWND)> callback)
+{
+    itemActivatedCallback_ = std::move(callback);
+}
+
+void AppSwitcherXamlView::SetItemDragReleasedCallback(std::function<void(HWND, POINT)> callback)
+{
+    itemDragReleasedCallback_ = std::move(callback);
 }
 
 void AppSwitcherXamlView::AttachPointerHandlers()
@@ -333,10 +449,7 @@ void AppSwitcherXamlView::ApplyItemTheme(ItemView& item)
         item.mainCard.Background(Brush(palette_.cardBackground));
     }
 
-    if (item.titleBorder)
-    {
-        item.titleBorder.Background(Brush(palette_.titleBackground));
-    }
+    ApplyItemInteractionState(item);
 
     if (item.thumbnailHost)
     {
@@ -356,7 +469,165 @@ void AppSwitcherXamlView::ApplyItemTheme(ItemView& item)
     if (item.closeButton)
     {
         item.closeButton.Foreground(Brush(palette_.buttonText));
+        item.closeButton.Background(Brush(winrt::Windows::UI::Color{0x00, 0x00, 0x00, 0x00}));
+
+        auto resources = item.closeButton.Resources();
+        resources.Insert(winrt::box_value(L"ButtonBackground"), Brush(winrt::Windows::UI::Color{0x00, 0x00, 0x00, 0x00}));
+        resources.Insert(winrt::box_value(L"ButtonForeground"), Brush(palette_.buttonText));
+        resources.Insert(winrt::box_value(L"ButtonBackgroundPointerOver"), Brush(palette_.closeButtonHoverBackground));
+        resources.Insert(winrt::box_value(L"ButtonForegroundPointerOver"), Brush(palette_.closeButtonHoverText));
+        resources.Insert(winrt::box_value(L"ButtonBackgroundPressed"), Brush(palette_.closeButtonHoverBackground));
+        resources.Insert(winrt::box_value(L"ButtonForegroundPressed"), Brush(palette_.closeButtonHoverText));
     }
+}
+
+void AppSwitcherXamlView::ApplyItemRowWeights(ItemView& item)
+{
+    if (!item.layoutGrid)
+    {
+        return;
+    }
+
+    const auto rows = item.layoutGrid.RowDefinitions();
+    if (rows.Size() < 2)
+    {
+        return;
+    }
+
+    rows.GetAt(0).Height(winrt::Windows::UI::Xaml::GridLengthHelper::FromValueAndType(
+        AppSwitcherLayoutEngine::TitleRowWeight,
+        winrt::Windows::UI::Xaml::GridUnitType::Star));
+    rows.GetAt(1).Height(winrt::Windows::UI::Xaml::GridLengthHelper::FromValueAndType(
+        AppSwitcherLayoutEngine::ContentRowWeight,
+        winrt::Windows::UI::Xaml::GridUnitType::Star));
+}
+
+void AppSwitcherXamlView::ApplyItemInteractionState(ItemView& item)
+{
+    if (item.titleBorder)
+    {
+        item.titleBorder.Background(Brush(item.hovered ? palette_.titleHoverBackground : palette_.titleBackground));
+    }
+
+    if (item.pressOverlay)
+    {
+        if (item.grabbed || item.pressed)
+        {
+            const auto overlayColor = item.grabbed
+                                          ? winrt::Windows::UI::Color{0x33, 0x00, 0x00, 0x00}
+                                          : winrt::Windows::UI::Color{0x22, 0x00, 0x00, 0x00};
+            item.pressOverlay.Background(Brush(overlayColor));
+            item.pressOverlay.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+        }
+        else
+        {
+            item.pressOverlay.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+        }
+    }
+
+    if (item.transform)
+    {
+        const double scale = item.grabbed ? 0.90 : item.pressed ? 0.985 : 1.0;
+        item.transform.ScaleX(scale);
+        item.transform.ScaleY(scale);
+    }
+}
+
+void AppSwitcherXamlView::ResetInteractionState()
+{
+    xamlPointerDragging_ = false;
+    xamlPointerPressed_ = false;
+    activeDragItemIndex_ = static_cast<size_t>(-1);
+    pressedItemIndex_ = static_cast<size_t>(-1);
+    pressPointDip_ = {};
+
+    if (appSwitcherContainer_)
+    {
+        appSwitcherContainer_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+    }
+
+    for (auto& item : items_)
+    {
+        item.hovered = false;
+        item.pressed = false;
+        item.grabbed = false;
+        if (item.root)
+        {
+            item.root.Visibility(item.visible
+                                     ? winrt::Windows::UI::Xaml::Visibility::Visible
+                                     : winrt::Windows::UI::Xaml::Visibility::Collapsed);
+        }
+        ApplyItemInteractionState(item);
+    }
+}
+
+void AppSwitcherXamlView::BeginGrab(size_t itemIndex)
+{
+    if (itemIndex >= items_.size())
+    {
+        return;
+    }
+
+    xamlPointerDragging_ = true;
+    xamlPointerPressed_ = false;
+    activeDragItemIndex_ = itemIndex;
+    pressedItemIndex_ = static_cast<size_t>(-1);
+
+    if (appSwitcherContainer_)
+    {
+        appSwitcherContainer_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+    }
+
+    for (size_t i = 0; i < items_.size(); ++i)
+    {
+        auto& item = items_[i];
+        item.pressed = false;
+        item.grabbed = i == itemIndex;
+        if (item.root && item.visible)
+        {
+            item.root.Visibility(i == itemIndex
+                                     ? winrt::Windows::UI::Xaml::Visibility::Visible
+                                     : winrt::Windows::UI::Xaml::Visibility::Collapsed);
+        }
+        ApplyItemInteractionState(item);
+    }
+}
+
+void AppSwitcherXamlView::FinishPressedItem(size_t itemIndex, PointDip releasePoint)
+{
+    if (itemIndex >= items_.size())
+    {
+        ResetInteractionState();
+        return;
+    }
+
+    HWND hwnd = items_[itemIndex].hwnd;
+    const bool wasGrabbed = items_[itemIndex].grabbed;
+    const POINT releaseScreenPoint = DipPointToScreenPixel(releasePoint);
+    ResetInteractionState();
+
+    if (wasGrabbed)
+    {
+        if (itemDragReleasedCallback_ && hwnd)
+        {
+            itemDragReleasedCallback_(hwnd, releaseScreenPoint);
+        }
+        return;
+    }
+
+    if (itemActivatedCallback_ && hwnd)
+    {
+        itemActivatedCallback_(hwnd);
+    }
+}
+
+POINT AppSwitcherXamlView::DipPointToScreenPixel(PointDip point) const
+{
+    POINT clientPoint{
+        static_cast<LONG>(std::lround(static_cast<double>(point.x) * currentDpiScale_)),
+        static_cast<LONG>(std::lround(static_cast<double>(point.y) * currentDpiScale_))};
+    ClientToScreen(hwnd_, &clientPoint);
+    return clientPoint;
 }
 
 void AppSwitcherXamlView::ClearItemThumbnail(ItemView& item)
@@ -382,6 +653,10 @@ void AppSwitcherXamlView::ResetItem(ItemView& item)
     item.layoutPosition = {};
     item.layoutSize = {};
     item.visible = false;
+    item.hovered = false;
+    item.pressed = false;
+    item.grabbed = false;
+    ApplyItemInteractionState(item);
 }
 
 void AppSwitcherXamlView::RenderSample(UINT widthPx, UINT heightPx, double scale)
@@ -390,7 +665,7 @@ void AppSwitcherXamlView::RenderSample(UINT widthPx, UINT heightPx, double scale
         static_cast<float>(static_cast<double>(widthPx) / std::max(0.01, scale)),
         static_cast<float>(static_cast<double>(heightPx) / std::max(0.01, scale))};
 
-    auto windows = EnumerateSwitcherWindows(hwnd_);
+    auto windows = EnumerateSwitcherWindows(hwnd_, targetMonitor_);
     std::wstringstream log;
     log << L"EnumerateSwitcherWindows: count=" << windows.size();
     for (const auto& window : windows)
@@ -421,6 +696,23 @@ bool AppSwitcherXamlView::LoadRoot()
         emptyIcon_ = root_.FindName(L"EmptyIcon").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
         emptyText_ = root_.FindName(L"EmptyText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
 
+        root_.PointerPressed([this](auto const&, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+            if (!root_)
+            {
+                return;
+            }
+
+            const auto point = args.GetCurrentPoint(root_).Position();
+            if (!HitTest({static_cast<float>(point.X), static_cast<float>(point.Y)}))
+            {
+                args.Handled(true);
+                if (missedInputCallback_)
+                {
+                    missedInputCallback_();
+                }
+            }
+        });
+
         host_->SetRoot(root_);
         ApplyTheme(palette_);
         AttachPointerHandlers();
@@ -441,15 +733,57 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
         const std::wstring xaml = LoadTextFileUtf8(ModuleRelativePath(kItemXamlPath));
         auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
         item.root = object.as<winrt::Windows::UI::Xaml::FrameworkElement>();
+        item.transform = item.root.FindName(L"ItemTransform").as<winrt::Windows::UI::Xaml::Media::CompositeTransform>();
+        item.layoutGrid = item.root.FindName(L"ItemLayoutGrid").as<winrt::Windows::UI::Xaml::Controls::Grid>();
         item.mainCard = item.root.FindName(L"MainCard").as<winrt::Windows::UI::Xaml::Controls::Border>();
         item.titleBorder = item.root.FindName(L"TitleBorder").as<winrt::Windows::UI::Xaml::Controls::Border>();
         item.title = item.root.FindName(L"TitleText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
         item.defaultIcon = item.root.FindName(L"DefaultIcon").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
         item.closeButton = item.root.FindName(L"CloseButton").as<winrt::Windows::UI::Xaml::Controls::Button>();
         item.thumbnailHost = item.root.FindName(L"ContentFrame").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        item.pressOverlay = item.root.FindName(L"PressOverlay").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        ApplyItemRowWeights(item);
         ApplyItemTheme(item);
 
         const size_t itemIndex = items_.size();
+        item.root.PointerEntered([this, itemIndex](auto const&, auto const&) {
+            if (itemIndex >= items_.size() || xamlPointerPressed_ || xamlPointerDragging_)
+            {
+                return;
+            }
+
+            items_[itemIndex].hovered = true;
+            ApplyItemInteractionState(items_[itemIndex]);
+        });
+
+        item.root.PointerExited([this, itemIndex](auto const&, auto const&) {
+            if (itemIndex >= items_.size() || xamlPointerPressed_ || xamlPointerDragging_)
+            {
+                return;
+            }
+
+            items_[itemIndex].hovered = false;
+            ApplyItemInteractionState(items_[itemIndex]);
+        });
+
+        if (item.closeButton)
+        {
+            item.closeButton.PointerEntered([this, itemIndex](auto const&, auto const&) {
+                if (itemIndex < items_.size() && items_[itemIndex].closeButton)
+                {
+                    items_[itemIndex].closeButton.Background(Brush(palette_.closeButtonHoverBackground));
+                    items_[itemIndex].closeButton.Foreground(Brush(palette_.closeButtonHoverText));
+                }
+            });
+            item.closeButton.PointerExited([this, itemIndex](auto const&, auto const&) {
+                if (itemIndex < items_.size() && items_[itemIndex].closeButton)
+                {
+                    items_[itemIndex].closeButton.Background(Brush(winrt::Windows::UI::Color{0x00, 0x00, 0x00, 0x00}));
+                    items_[itemIndex].closeButton.Foreground(Brush(palette_.buttonText));
+                }
+            });
+        }
+
         item.root.PointerPressed([this, itemIndex](auto const& sender, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
             if (!root_ || itemIndex >= items_.size())
             {
@@ -457,52 +791,78 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
             }
 
             const auto point = args.GetCurrentPoint(root_).Position();
-            const double logicalX = point.X + visibleOriginDip_.x;
-            const double logicalY = point.Y + visibleOriginDip_.y;
+            const PointDip logicalPoint{
+                static_cast<float>(point.X + visibleOriginDip_.x),
+                static_cast<float>(point.Y + visibleOriginDip_.y)};
+            pressedItemIndex_ = itemIndex;
             activeDragItemIndex_ = itemIndex;
-            xamlPointerDragging_ = true;
-            xamlDragOffsetX_ = logicalX - items_[itemIndex].layoutPosition.x;
-            xamlDragOffsetY_ = logicalY - items_[itemIndex].layoutPosition.y;
+            xamlPointerPressed_ = true;
+            xamlPointerDragging_ = false;
+            pressPointDip_ = logicalPoint;
+            xamlDragOffsetX_ = logicalPoint.x - items_[itemIndex].layoutPosition.x;
+            xamlDragOffsetY_ = logicalPoint.y - items_[itemIndex].layoutPosition.y;
+            items_[itemIndex].pressed = true;
+            items_[itemIndex].hovered = false;
+            ApplyItemInteractionState(items_[itemIndex]);
             sender.template as<winrt::Windows::UI::Xaml::UIElement>().CapturePointer(args.Pointer());
             args.Handled(true);
         });
 
         item.root.PointerMoved([this](auto const&, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
-            if (!xamlPointerDragging_ || !root_ || activeDragItemIndex_ >= items_.size())
+            if ((!xamlPointerPressed_ && !xamlPointerDragging_) || !root_ || activeDragItemIndex_ >= items_.size())
             {
                 return;
             }
 
             const auto point = args.GetCurrentPoint(root_).Position();
+            const PointDip logicalPoint{
+                static_cast<float>(point.X + visibleOriginDip_.x),
+                static_cast<float>(point.Y + visibleOriginDip_.y)};
             auto& activeItem = items_[activeDragItemIndex_];
-            const double logicalX = point.X + visibleOriginDip_.x;
-            const double logicalY = point.Y + visibleOriginDip_.y;
-            activeItem.layoutPosition = {
-                static_cast<float>(std::clamp(logicalX - xamlDragOffsetX_, 0.0, std::max(0.0, static_cast<double>(clientSizeDip_.width) - activeItem.layoutSize.width))),
-                static_cast<float>(std::clamp(logicalY - xamlDragOffsetY_, 0.0, std::max(0.0, static_cast<double>(clientSizeDip_.height) - activeItem.layoutSize.height)))};
-            UpdateVisibleBoundsAndPositions();
-            if (boundsChangedCallback_)
+            constexpr double dragThresholdDip = 10.0;
+            if (xamlPointerPressed_ && Distance(logicalPoint, pressPointDip_) > dragThresholdDip)
             {
-                boundsChangedCallback_();
+                BeginGrab(activeDragItemIndex_);
+            }
+
+            if (xamlPointerDragging_)
+            {
+                activeItem.layoutPosition = {
+                    static_cast<float>(std::clamp(static_cast<double>(logicalPoint.x) - xamlDragOffsetX_, 0.0, std::max(0.0, static_cast<double>(clientSizeDip_.width) - activeItem.layoutSize.width))),
+                    static_cast<float>(std::clamp(static_cast<double>(logicalPoint.y) - xamlDragOffsetY_, 0.0, std::max(0.0, static_cast<double>(clientSizeDip_.height) - activeItem.layoutSize.height)))};
+                UpdateVisibleBoundsAndPositions();
+                if (boundsChangedCallback_)
+                {
+                    boundsChangedCallback_();
+                }
             }
             args.Handled(true);
         });
 
-        auto endDrag = [this](auto const& sender, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
-            if (!xamlPointerDragging_)
+        auto endInteraction = [this](auto const& sender, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+            if (!xamlPointerPressed_ && !xamlPointerDragging_)
             {
                 return;
             }
 
-            xamlPointerDragging_ = false;
-            activeDragItemIndex_ = static_cast<size_t>(-1);
+            const size_t itemIndexToFinish = activeDragItemIndex_;
+            const auto point = root_ ? args.GetCurrentPoint(root_).Position() : winrt::Windows::Foundation::Point{};
+            const PointDip releasePoint{
+                static_cast<float>(point.X + visibleOriginDip_.x),
+                static_cast<float>(point.Y + visibleOriginDip_.y)};
             sender.template as<winrt::Windows::UI::Xaml::UIElement>().ReleasePointerCapture(args.Pointer());
+            FinishPressedItem(itemIndexToFinish, releasePoint);
             args.Handled(true);
         };
 
-        item.root.PointerReleased(endDrag);
-        item.root.PointerCanceled(endDrag);
+        item.root.PointerReleased(endInteraction);
+        item.root.PointerCanceled([this](auto const& sender, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+            sender.template as<winrt::Windows::UI::Xaml::UIElement>().ReleasePointerCapture(args.Pointer());
+            ResetInteractionState();
+            args.Handled(true);
+        });
 
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetZIndex(item.root, 10);
         layoutCanvas_.Children().Append(item.root);
     }
     catch (const winrt::hresult_error& error)
@@ -565,6 +925,12 @@ void AppSwitcherXamlView::UpdateVisibleBoundsAndPositions()
 
     if (focusBorder_)
     {
+        if (xamlPointerDragging_)
+        {
+            focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+            return;
+        }
+
         auto firstVisible = std::find_if(items_.begin(), items_.end(), [](const ItemView& item) { return item.visible; });
         if (firstVisible != items_.end())
         {
@@ -611,7 +977,9 @@ void AppSwitcherXamlView::ApplyLayout(
     if (activeDragItemIndex_ >= windows.size())
     {
         xamlPointerDragging_ = false;
+        xamlPointerPressed_ = false;
         activeDragItemIndex_ = static_cast<size_t>(-1);
+        pressedItemIndex_ = static_cast<size_t>(-1);
     }
 
     for (size_t i = 0; i < items_.size(); ++i)
@@ -679,11 +1047,10 @@ void AppSwitcherXamlView::ApplyLayout(
             item.root.UpdateLayout();
             item.thumbnailHost.UpdateLayout();
 
-            constexpr double titleRowWeight = 1.8;
-            constexpr double contentRowWeight = 8.2;
-            constexpr double totalRowWeight = titleRowWeight + contentRowWeight;
             const double thumbnailWidth = std::max(1.0, w);
-            const double thumbnailHeight = std::max(1.0, h * contentRowWeight / totalRowWeight);
+            const double thumbnailHeight = std::max(
+                1.0,
+                h * AppSwitcherLayoutEngine::ContentRowWeight / AppSwitcherLayoutEngine::TotalRowWeight);
             ApplyContentClip(item.thumbnailHost, thumbnailWidth, thumbnailHeight);
 
             const bool needsThumbnail = !item.thumbnailSlot || ShouldRecreateThumbnail(

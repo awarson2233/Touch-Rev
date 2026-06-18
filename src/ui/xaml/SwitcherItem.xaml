@@ -12,10 +12,10 @@
         x:Name="MainCard"
         Background="#EE242424"
         CornerRadius="10">
-        <Grid>
+        <Grid x:Name="ItemLayoutGrid">
             <Grid.RowDefinitions>
-                <RowDefinition Height="1.8*" />
-                <RowDefinition Height="8.2*" />
+                <RowDefinition Height="1.5*" />
+                <RowDefinition Height="8.5*" />
             </Grid.RowDefinitions>
 
             <Border
@@ -89,6 +89,14 @@
                         Text="ThumbnailHost" />
                 </Grid>
             </Border>
+
+            <Border
+                x:Name="PressOverlay"
+                Grid.RowSpan="2"
+                Background="#22000000"
+                CornerRadius="10"
+                IsHitTestVisible="False"
+                Visibility="Collapsed" />
         </Grid>
     </Border>
 </Grid>
