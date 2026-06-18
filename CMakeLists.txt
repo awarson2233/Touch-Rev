@@ -10,6 +10,8 @@ add_executable(TouchRevGUI WIN32
     app.manifest
     src/ui/AppWindow.cpp
     src/ui/AppWindow.h
+    src/ui/AppTheme.cpp
+    src/ui/AppTheme.h
     src/ui/AppSwitcherLayoutEngine.cpp
     src/ui/AppSwitcherLayoutEngine.h
     src/ui/AppSwitcherXamlView.cpp
@@ -18,6 +20,8 @@ add_executable(TouchRevGUI WIN32
     src/ui/BackdropController.h
     src/ui/ThinXamlAppSwitcherHost.cpp
     src/ui/ThinXamlAppSwitcherHost.h
+    src/ui/ThemeManager.cpp
+    src/ui/ThemeManager.h
     src/thumbnail/PrivateThumbnailInterfaces.h
     src/thumbnail/PrivateThumbnailManager.cpp
     src/thumbnail/PrivateThumbnailManager.h

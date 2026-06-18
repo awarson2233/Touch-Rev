@@ -30,10 +30,10 @@ constexpr int kDwmwcpRound = DWMWCP_ROUND;
 constexpr int kDwmwcpRound = 2;
 #endif
 
-#if defined(DWMSBT_MAINWINDOW)
-constexpr int kDwmsbtMainWindow = DWMSBT_MAINWINDOW;
+#if defined(DWMSBT_NONE)
+constexpr int kDwmsbtNone = DWMSBT_NONE;
 #else
-constexpr int kDwmsbtMainWindow = 2;
+constexpr int kDwmsbtNone = 1;
 #endif
 }
 
@@ -79,7 +79,7 @@ BackdropApplyResult BackdropController::Apply(HWND hwnd, bool useDarkMode) const
         DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE)", result.cornerHr);
     }
 
-    int backdrop = kDwmsbtMainWindow;
+    int backdrop = kDwmsbtNone;
     result.systemBackdropHr = DwmSetWindowAttribute(
         hwnd,
         kDwmwaSystemBackdropType,

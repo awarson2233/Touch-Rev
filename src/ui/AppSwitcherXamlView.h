@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AppSwitcherLayoutEngine.h"
+#include "AppTheme.h"
 #include "ThinXamlAppSwitcherHost.h"
 #include "common/CoordinateSpace.h"
 #include "thumbnail/PrivateThumbnailManager.h"
@@ -26,14 +27,18 @@ public:
     bool HitTest(PointDip point) const;
     PointDip DragPosition() const { return dragPosition_; }
     void SetDragPosition(PointDip position);
+    void ApplyTheme(const AppSwitcherPalette& palette);
 
 private:
     struct ItemView
     {
         winrt::Windows::UI::Xaml::FrameworkElement root{nullptr};
+        winrt::Windows::UI::Xaml::Controls::Border mainCard{nullptr};
+        winrt::Windows::UI::Xaml::Controls::Border titleBorder{nullptr};
         winrt::Windows::UI::Xaml::Controls::TextBlock title{nullptr};
+        winrt::Windows::UI::Xaml::Controls::TextBlock defaultIcon{nullptr};
         winrt::Windows::UI::Xaml::Controls::Button closeButton{nullptr};
-        winrt::Windows::UI::Xaml::FrameworkElement thumbnailHost{nullptr};
+        winrt::Windows::UI::Xaml::Controls::Border thumbnailHost{nullptr};
         HWND hwnd = nullptr;
         PointDip layoutPosition{};
         std::unique_ptr<touchrev::thumbnail::PrivateThumbnailSlot> thumbnailSlot;
@@ -47,6 +52,7 @@ private:
     void EnsureItemCount(size_t count);
     void ApplyLayout(const std::vector<AppSwitcherWindowItem>& windows, UINT widthPx, UINT heightPx, double scale);
     void AttachPointerHandlers();
+    void ApplyItemTheme(ItemView& item);
     void ClearItemThumbnail(ItemView& item);
     void ResetItem(ItemView& item);
 
@@ -58,10 +64,12 @@ private:
     bool initialized_ = false;
 
     winrt::Windows::UI::Xaml::Controls::Grid root_{nullptr};
-    winrt::Windows::UI::Xaml::FrameworkElement appSwitcherContainer_{nullptr};
+    winrt::Windows::UI::Xaml::Controls::Border appSwitcherContainer_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Canvas layoutCanvas_{nullptr};
-    winrt::Windows::UI::Xaml::FrameworkElement focusBorder_{nullptr};
+    winrt::Windows::UI::Xaml::Controls::Border focusBorder_{nullptr};
     winrt::Windows::UI::Xaml::FrameworkElement emptyGrid_{nullptr};
+    winrt::Windows::UI::Xaml::Controls::TextBlock emptyIcon_{nullptr};
+    winrt::Windows::UI::Xaml::Controls::TextBlock emptyText_{nullptr};
     std::vector<ItemView> items_;
     PointDip dragPosition_{};
     SizeDip contentBoundsDip_{};
@@ -71,5 +79,6 @@ private:
     double xamlDragOffsetX_ = 0.0;
     double xamlDragOffsetY_ = 0.0;
     double currentDpiScale_ = 1.0;
+    AppSwitcherPalette palette_ = PaletteForTheme(AppThemeMode::Dark);
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
 };

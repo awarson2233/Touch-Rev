@@ -3,6 +3,7 @@
 #include "AppSwitcherXamlView.h"
 #include "BackdropController.h"
 #include "ThinXamlAppSwitcherHost.h"
+#include "ThemeManager.h"
 #include "common/CoordinateSpace.h"
 #include "input/InputController.h"
 
@@ -24,6 +25,7 @@ private:
     void OnDpiChanged(WPARAM wParam, LPARAM lParam);
     void OnPaint();
     void ApplyBackdropAndBackgroundMode();
+    void RefreshTheme();
     void HandleInputResult(const InputController::Result& result);
 
     bool CanStartDragFromPointer(WPARAM wParam) const;
@@ -41,6 +43,7 @@ private:
     BackdropController backdropController_;
     CoordinateSpace coordinates_;
     InputController inputController_;
+    ThemeManager themeManager_;
     ThinXamlAppSwitcherHost xamlHost_;
     AppSwitcherXamlView appSwitcherXamlView_;
 };

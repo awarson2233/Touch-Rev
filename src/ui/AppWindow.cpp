@@ -30,7 +30,7 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
     windowClass.hInstance = instance_;
     windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    windowClass.hbrBackground = static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH));
+    windowClass.hbrBackground = nullptr;
     windowClass.lpszMenuName = nullptr;
     windowClass.lpszClassName = kWindowClassName;
     windowClass.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
@@ -138,6 +138,9 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_THEMECHANGED:
     case WM_SETTINGCHANGE:
+        RefreshTheme();
+        return 0;
+
     case kWmDwmCompositionChanged:
         ApplyBackdropAndBackgroundMode();
         return 0;
@@ -212,6 +215,7 @@ HRESULT AppWindow::OnCreate()
 {
     dpi_ = static_cast<float>(GetDpiForWindow(hwnd_));
     coordinates_.Update(dpi_, GetClientWidth(hwnd_), GetClientHeight(hwnd_));
+    themeManager_.Initialize();
     ApplyBackdropAndBackgroundMode();
     inputController_.Initialize(hwnd_);
 
@@ -226,6 +230,7 @@ HRESULT AppWindow::OnCreate()
         DebugLog(L"XAML AppSwitcher view initialization failed.");
         return E_FAIL;
     }
+    appSwitcherXamlView_.ApplyTheme(themeManager_.Palette());
 
     return S_OK;
 }
@@ -274,17 +279,23 @@ void AppWindow::OnDpiChanged(WPARAM wParam, LPARAM lParam)
 void AppWindow::OnPaint()
 {
     PAINTSTRUCT paint{};
-    HDC dc = BeginPaint(hwnd_, &paint);
-    if (dc)
-    {
-        FillRect(dc, &paint.rcPaint, static_cast<HBRUSH>(GetStockObject(BLACK_BRUSH)));
-    }
+    BeginPaint(hwnd_, &paint);
     EndPaint(hwnd_, &paint);
 }
 
 void AppWindow::ApplyBackdropAndBackgroundMode()
 {
     backdropController_.Apply(hwnd_, BackdropController::ShouldUseDarkMode());
+}
+
+void AppWindow::RefreshTheme()
+{
+    const bool changed = themeManager_.Refresh();
+    ApplyBackdropAndBackgroundMode();
+    if (changed)
+    {
+        appSwitcherXamlView_.ApplyTheme(themeManager_.Palette());
+    }
 }
 
 void AppWindow::HandleInputResult(const InputController::Result& result)

@@ -146,6 +146,29 @@ bool ShouldRecreateThumbnail(
            std::abs(slot.dpiScale - dpiScale) > 0.01;
 }
 
+winrt::Windows::UI::Xaml::Media::SolidColorBrush Brush(winrt::Windows::UI::Color color)
+{
+    return winrt::Windows::UI::Xaml::Media::SolidColorBrush(color);
+}
+
+winrt::Windows::UI::Xaml::Media::Brush AcrylicBrush(const AppSwitcherPalette& palette)
+{
+    try
+    {
+        auto brush = winrt::Windows::UI::Xaml::Media::AcrylicBrush();
+        brush.BackgroundSource(winrt::Windows::UI::Xaml::Media::AcrylicBackgroundSource::HostBackdrop);
+        brush.TintColor(palette.containerAcrylicTint);
+        brush.TintOpacity(palette.containerAcrylicTintOpacity);
+        brush.FallbackColor(palette.containerAcrylicFallback);
+        return brush;
+    }
+    catch (const winrt::hresult_error& error)
+    {
+        DebugLogHResult(L"Create AcrylicBrush", error.code());
+        return Brush(palette.containerAcrylicFallback);
+    }
+}
+
 std::wstring ToWideFromUtf8(const std::string& text)
 {
     if (text.empty())
@@ -212,6 +235,8 @@ void AppSwitcherXamlView::Shutdown()
     layoutCanvas_ = nullptr;
     focusBorder_ = nullptr;
     emptyGrid_ = nullptr;
+    emptyIcon_ = nullptr;
+    emptyText_ = nullptr;
     root_ = nullptr;
     host_ = nullptr;
     hwnd_ = nullptr;
@@ -242,6 +267,76 @@ void AppSwitcherXamlView::SetDragPosition(PointDip position)
 void AppSwitcherXamlView::AttachPointerHandlers()
 {
     // Item-level pointer handlers are attached when SwitcherItem instances are created.
+}
+
+void AppSwitcherXamlView::ApplyTheme(const AppSwitcherPalette& palette)
+{
+    palette_ = palette;
+
+    if (root_)
+    {
+        root_.Background(Brush(palette_.rootBackdrop));
+    }
+
+    if (appSwitcherContainer_)
+    {
+        appSwitcherContainer_.Background(AcrylicBrush(palette_));
+        appSwitcherContainer_.BorderBrush(Brush(palette_.containerBorder));
+    }
+
+    if (focusBorder_)
+    {
+        focusBorder_.BorderBrush(Brush(palette_.focusBorder));
+        focusBorder_.Background(Brush(palette_.focusFill));
+    }
+
+    if (emptyIcon_)
+    {
+        emptyIcon_.Foreground(Brush(palette_.secondaryText));
+    }
+
+    if (emptyText_)
+    {
+        emptyText_.Foreground(Brush(palette_.secondaryText));
+    }
+
+    for (auto& item : items_)
+    {
+        ApplyItemTheme(item);
+    }
+}
+
+void AppSwitcherXamlView::ApplyItemTheme(ItemView& item)
+{
+    if (item.mainCard)
+    {
+        item.mainCard.Background(Brush(palette_.cardBackground));
+    }
+
+    if (item.titleBorder)
+    {
+        item.titleBorder.Background(Brush(palette_.titleBackground));
+    }
+
+    if (item.thumbnailHost)
+    {
+        item.thumbnailHost.Background(Brush(palette_.contentBackground));
+    }
+
+    if (item.title)
+    {
+        item.title.Foreground(Brush(palette_.primaryText));
+    }
+
+    if (item.defaultIcon)
+    {
+        item.defaultIcon.Foreground(Brush(palette_.iconText));
+    }
+
+    if (item.closeButton)
+    {
+        item.closeButton.Foreground(Brush(palette_.buttonText));
+    }
 }
 
 void AppSwitcherXamlView::ClearItemThumbnail(ItemView& item)
@@ -298,12 +393,15 @@ bool AppSwitcherXamlView::LoadRoot()
 
         auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
         root_ = object.as<winrt::Windows::UI::Xaml::Controls::Grid>();
-        appSwitcherContainer_ = root_.FindName(L"AppSwitcherContainer").as<winrt::Windows::UI::Xaml::FrameworkElement>();
+        appSwitcherContainer_ = root_.FindName(L"AppSwitcherContainer").as<winrt::Windows::UI::Xaml::Controls::Border>();
         layoutCanvas_ = root_.FindName(L"LayoutCanvas").as<winrt::Windows::UI::Xaml::Controls::Canvas>();
-        focusBorder_ = root_.FindName(L"FocusBorder").as<winrt::Windows::UI::Xaml::FrameworkElement>();
+        focusBorder_ = root_.FindName(L"FocusBorder").as<winrt::Windows::UI::Xaml::Controls::Border>();
         emptyGrid_ = root_.FindName(L"EmptyGrid").as<winrt::Windows::UI::Xaml::FrameworkElement>();
+        emptyIcon_ = root_.FindName(L"EmptyIcon").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
+        emptyText_ = root_.FindName(L"EmptyText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
 
         host_->SetRoot(root_);
+        ApplyTheme(palette_);
         AttachPointerHandlers();
         return true;
     }
@@ -322,9 +420,13 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
         const std::wstring xaml = LoadTextFileUtf8(ModuleRelativePath(kItemXamlPath));
         auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
         item.root = object.as<winrt::Windows::UI::Xaml::FrameworkElement>();
+        item.mainCard = item.root.FindName(L"MainCard").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        item.titleBorder = item.root.FindName(L"TitleBorder").as<winrt::Windows::UI::Xaml::Controls::Border>();
         item.title = item.root.FindName(L"TitleText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
+        item.defaultIcon = item.root.FindName(L"DefaultIcon").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
         item.closeButton = item.root.FindName(L"CloseButton").as<winrt::Windows::UI::Xaml::Controls::Button>();
-        item.thumbnailHost = item.root.FindName(L"ContentFrame").as<winrt::Windows::UI::Xaml::FrameworkElement>();
+        item.thumbnailHost = item.root.FindName(L"ContentFrame").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        ApplyItemTheme(item);
 
         const size_t itemIndex = items_.size();
         item.root.PointerPressed([this, itemIndex](auto const& sender, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
