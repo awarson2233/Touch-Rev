@@ -26,6 +26,7 @@ private:
     void OnPaint();
     void ApplyBackdropAndBackgroundMode();
     void RefreshTheme();
+    void UpdateTransparentRegion();
     void HandleInputResult(const InputController::Result& result);
 
     bool CanStartDragFromPointer(WPARAM wParam) const;

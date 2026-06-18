@@ -41,23 +41,25 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
         return false;
     }
 
-    constexpr DWORD style = WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN;
+    constexpr DWORD style = WS_POPUP | WS_CLIPCHILDREN;
     constexpr DWORD exStyle = 0;
-    const UINT initialDpi = GetDpiForSystem();
-    RECT windowRect{
-        0,
-        0,
-        MulDiv(1000, static_cast<int>(initialDpi), 96),
-        MulDiv(700, static_cast<int>(initialDpi), 96)};
-    AdjustWindowRectExForDpi(&windowRect, style, FALSE, exStyle, initialDpi);
+    MONITORINFO monitorInfo{};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+    HMONITOR monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    if (!GetMonitorInfoW(monitor, &monitorInfo))
+    {
+        monitorInfo.rcMonitor = {0, 0, 1000, 700};
+    }
+
+    const RECT windowRect = monitorInfo.rcMonitor;
 
     hwnd_ = CreateWindowExW(
         exStyle,
         kWindowClassName,
         kWindowTitle,
         style,
-        CW_USEDEFAULT,
-        CW_USEDEFAULT,
+        windowRect.left,
+        windowRect.top,
         windowRect.right - windowRect.left,
         windowRect.bottom - windowRect.top,
         nullptr,
@@ -225,12 +227,17 @@ HRESULT AppWindow::OnCreate()
         return E_FAIL;
     }
 
+    appSwitcherXamlView_.SetBoundsChangedCallback([this]() {
+        UpdateTransparentRegion();
+    });
+
     if (!appSwitcherXamlView_.Initialize(hwnd_, xamlHost_))
     {
         DebugLog(L"XAML AppSwitcher view initialization failed.");
         return E_FAIL;
     }
     appSwitcherXamlView_.ApplyTheme(themeManager_.Palette());
+    UpdateTransparentRegion();
 
     return S_OK;
 }
@@ -247,6 +254,7 @@ void AppWindow::OnSize(UINT width, UINT height)
     coordinates_.Update(dpi_, width, height);
     xamlHost_.Resize(width, height);
     appSwitcherXamlView_.Resize(width, height, coordinates_.Scale());
+    UpdateTransparentRegion();
     inputController_.RebaseActiveDrag(hwnd_, appSwitcherXamlView_.DragPosition(), coordinates_);
 }
 
@@ -273,6 +281,7 @@ void AppWindow::OnDpiChanged(WPARAM wParam, LPARAM lParam)
     coordinates_.SetClientSize(clientWidth, clientHeight);
     xamlHost_.Resize(clientWidth, clientHeight);
     appSwitcherXamlView_.Resize(clientWidth, clientHeight, coordinates_.Scale());
+    UpdateTransparentRegion();
     inputController_.RebaseActiveDrag(hwnd_, appSwitcherXamlView_.DragPosition(), coordinates_);
 }
 
@@ -295,6 +304,50 @@ void AppWindow::RefreshTheme()
     if (changed)
     {
         appSwitcherXamlView_.ApplyTheme(themeManager_.Palette());
+    }
+    UpdateTransparentRegion();
+}
+
+void AppWindow::UpdateTransparentRegion()
+{
+    if (!hwnd_)
+    {
+        return;
+    }
+
+    RECT visible = appSwitcherXamlView_.VisibleBoundsPx();
+    const int visibleWidth = std::max<int>(1, static_cast<int>(visible.right - visible.left));
+    const int visibleHeight = std::max<int>(1, static_cast<int>(visible.bottom - visible.top));
+    xamlHost_.SetBounds(
+        visible.left,
+        visible.top,
+        static_cast<UINT>(visibleWidth),
+        static_cast<UINT>(visibleHeight));
+
+    POINT clientOrigin{0, 0};
+    ClientToScreen(hwnd_, &clientOrigin);
+
+    RECT windowRect{};
+    GetWindowRect(hwnd_, &windowRect);
+    const int offsetX = clientOrigin.x - windowRect.left;
+    const int offsetY = clientOrigin.y - windowRect.top;
+
+    constexpr int bleedPx = 2;
+    HRGN region = CreateRectRgn(
+        visible.left + offsetX - bleedPx,
+        visible.top + offsetY - bleedPx,
+        visible.right + offsetX + bleedPx,
+        visible.bottom + offsetY + bleedPx);
+    if (region == nullptr)
+    {
+        DebugLogHResult(L"CreateRectRgn", HResultFromLastError());
+        return;
+    }
+
+    if (SetWindowRgn(hwnd_, region, TRUE) == 0)
+    {
+        DebugLogHResult(L"SetWindowRgn", HResultFromLastError());
+        DeleteObject(region);
     }
 }
 

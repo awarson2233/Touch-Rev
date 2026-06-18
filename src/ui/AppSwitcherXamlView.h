@@ -13,6 +13,7 @@
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 
+#include <functional>
 #include <memory>
 #include <string>
 #include <vector>
@@ -25,9 +26,12 @@ public:
     void Resize(UINT widthPx, UINT heightPx, double scale);
     void RenderSample(UINT widthPx, UINT heightPx, double scale);
     bool HitTest(PointDip point) const;
+    RECT VisibleBoundsPx() const;
+    RECT ContainerBoundsPx() const;
     PointDip DragPosition() const { return dragPosition_; }
     void SetDragPosition(PointDip position);
     void ApplyTheme(const AppSwitcherPalette& palette);
+    void SetBoundsChangedCallback(std::function<void()> callback);
 
 private:
     struct ItemView
@@ -41,6 +45,7 @@ private:
         winrt::Windows::UI::Xaml::Controls::Border thumbnailHost{nullptr};
         HWND hwnd = nullptr;
         PointDip layoutPosition{};
+        SizeDip layoutSize{};
         std::unique_ptr<touchrev::thumbnail::PrivateThumbnailSlot> thumbnailSlot;
         HRESULT thumbnailError = S_OK;
         bool thumbnailFailed = false;
@@ -52,6 +57,7 @@ private:
     void EnsureItemCount(size_t count);
     void ApplyLayout(const std::vector<AppSwitcherWindowItem>& windows, UINT widthPx, UINT heightPx, double scale);
     void AttachPointerHandlers();
+    void UpdateVisibleBoundsAndPositions();
     void ApplyItemTheme(ItemView& item);
     void ClearItemThumbnail(ItemView& item);
     void ResetItem(ItemView& item);
@@ -72,13 +78,17 @@ private:
     winrt::Windows::UI::Xaml::Controls::TextBlock emptyText_{nullptr};
     std::vector<ItemView> items_;
     PointDip dragPosition_{};
+    PointDip contentOriginDip_{};
+    PointDip visibleOriginDip_{};
     SizeDip contentBoundsDip_{};
+    SizeDip visibleBoundsDip_{};
     SizeDip clientSizeDip_{};
     bool xamlPointerDragging_ = false;
     size_t activeDragItemIndex_ = static_cast<size_t>(-1);
     double xamlDragOffsetX_ = 0.0;
     double xamlDragOffsetY_ = 0.0;
     double currentDpiScale_ = 1.0;
+    std::function<void()> boundsChangedCallback_;
     AppSwitcherPalette palette_ = PaletteForTheme(AppThemeMode::Dark);
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
 };

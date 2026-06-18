@@ -22,6 +22,7 @@ public:
     bool Initialize(HWND parentHwnd);
     void Shutdown();
     void Resize(UINT width, UINT height);
+    void SetBounds(int left, int top, UINT width, UINT height);
 
     bool IsInitialized() const { return initialized_; }
     HWND ChildHwnd() const { return xamlHwnd_; }

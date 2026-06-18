@@ -97,6 +97,11 @@ void ThinXamlAppSwitcherHost::Shutdown()
 
 void ThinXamlAppSwitcherHost::Resize(UINT width, UINT height)
 {
+    SetBounds(0, 0, width, height);
+}
+
+void ThinXamlAppSwitcherHost::SetBounds(int left, int top, UINT width, UINT height)
+{
     if (!xamlHwnd_)
     {
         return;
@@ -105,8 +110,8 @@ void ThinXamlAppSwitcherHost::Resize(UINT width, UINT height)
     SetWindowPos(
         xamlHwnd_,
         nullptr,
-        0,
-        0,
+        left,
+        top,
         static_cast<int>(std::max(1u, width)),
         static_cast<int>(std::max(1u, height)),
         SWP_NOZORDER | SWP_SHOWWINDOW);

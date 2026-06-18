@@ -259,9 +259,34 @@ bool AppSwitcherXamlView::HitTest(PointDip point) const
            point.x <= clientSizeDip_.width && point.y <= clientSizeDip_.height;
 }
 
+RECT AppSwitcherXamlView::VisibleBoundsPx() const
+{
+    const double safeScale = std::max(0.01, currentDpiScale_);
+    return {
+        static_cast<LONG>(std::floor(static_cast<double>(visibleOriginDip_.x) * safeScale)),
+        static_cast<LONG>(std::floor(static_cast<double>(visibleOriginDip_.y) * safeScale)),
+        static_cast<LONG>(std::ceil(static_cast<double>(visibleOriginDip_.x + visibleBoundsDip_.width) * safeScale)),
+        static_cast<LONG>(std::ceil(static_cast<double>(visibleOriginDip_.y + visibleBoundsDip_.height) * safeScale))};
+}
+
+RECT AppSwitcherXamlView::ContainerBoundsPx() const
+{
+    const double safeScale = std::max(0.01, currentDpiScale_);
+    return {
+        static_cast<LONG>(std::floor(static_cast<double>(contentOriginDip_.x) * safeScale)),
+        static_cast<LONG>(std::floor(static_cast<double>(contentOriginDip_.y) * safeScale)),
+        static_cast<LONG>(std::ceil(static_cast<double>(contentOriginDip_.x + contentBoundsDip_.width) * safeScale)),
+        static_cast<LONG>(std::ceil(static_cast<double>(contentOriginDip_.y + contentBoundsDip_.height) * safeScale))};
+}
+
 void AppSwitcherXamlView::SetDragPosition(PointDip position)
 {
     dragPosition_ = position;
+}
+
+void AppSwitcherXamlView::SetBoundsChangedCallback(std::function<void()> callback)
+{
+    boundsChangedCallback_ = std::move(callback);
 }
 
 void AppSwitcherXamlView::AttachPointerHandlers()
@@ -280,7 +305,7 @@ void AppSwitcherXamlView::ApplyTheme(const AppSwitcherPalette& palette)
 
     if (appSwitcherContainer_)
     {
-        appSwitcherContainer_.Background(AcrylicBrush(palette_));
+        appSwitcherContainer_.Background(Brush(palette_.containerBackground));
         appSwitcherContainer_.BorderBrush(Brush(palette_.containerBorder));
     }
 
@@ -360,6 +385,7 @@ void AppSwitcherXamlView::ResetItem(ItemView& item)
     ClearItemThumbnail(item);
     item.hwnd = nullptr;
     item.layoutPosition = {};
+    item.layoutSize = {};
     item.visible = false;
 }
 
@@ -436,12 +462,12 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
             }
 
             const auto point = args.GetCurrentPoint(root_).Position();
-            const double left = winrt::Windows::UI::Xaml::Controls::Canvas::GetLeft(items_[itemIndex].root);
-            const double top = winrt::Windows::UI::Xaml::Controls::Canvas::GetTop(items_[itemIndex].root);
+            const double logicalX = point.X + visibleOriginDip_.x;
+            const double logicalY = point.Y + visibleOriginDip_.y;
             activeDragItemIndex_ = itemIndex;
             xamlPointerDragging_ = true;
-            xamlDragOffsetX_ = point.X - left;
-            xamlDragOffsetY_ = point.Y - top;
+            xamlDragOffsetX_ = logicalX - items_[itemIndex].layoutPosition.x;
+            xamlDragOffsetY_ = logicalY - items_[itemIndex].layoutPosition.y;
             sender.template as<winrt::Windows::UI::Xaml::UIElement>().CapturePointer(args.Pointer());
             args.Handled(true);
         });
@@ -454,8 +480,16 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
 
             const auto point = args.GetCurrentPoint(root_).Position();
             auto& activeItem = items_[activeDragItemIndex_];
-            winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(activeItem.root, point.X - xamlDragOffsetX_);
-            winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(activeItem.root, point.Y - xamlDragOffsetY_);
+            const double logicalX = point.X + visibleOriginDip_.x;
+            const double logicalY = point.Y + visibleOriginDip_.y;
+            activeItem.layoutPosition = {
+                static_cast<float>(std::clamp(logicalX - xamlDragOffsetX_, 0.0, std::max(0.0, static_cast<double>(clientSizeDip_.width) - activeItem.layoutSize.width))),
+                static_cast<float>(std::clamp(logicalY - xamlDragOffsetY_, 0.0, std::max(0.0, static_cast<double>(clientSizeDip_.height) - activeItem.layoutSize.height)))};
+            UpdateVisibleBoundsAndPositions();
+            if (boundsChangedCallback_)
+            {
+                boundsChangedCallback_();
+            }
             args.Handled(true);
         });
 
@@ -496,6 +530,101 @@ void AppSwitcherXamlView::EnsureItemCount(size_t count)
     }
 }
 
+void AppSwitcherXamlView::UpdateVisibleBoundsAndPositions()
+{
+    constexpr double bleedDip = 16.0;
+    double left = static_cast<double>(contentOriginDip_.x);
+    double top = static_cast<double>(contentOriginDip_.y);
+    double right = left + static_cast<double>(contentBoundsDip_.width);
+    double bottom = top + static_cast<double>(contentBoundsDip_.height);
+
+    for (const auto& item : items_)
+    {
+        if (!item.visible)
+        {
+            continue;
+        }
+
+        left = std::min(left, static_cast<double>(item.layoutPosition.x));
+        top = std::min(top, static_cast<double>(item.layoutPosition.y));
+        right = std::max(right, static_cast<double>(item.layoutPosition.x + item.layoutSize.width));
+        bottom = std::max(bottom, static_cast<double>(item.layoutPosition.y + item.layoutSize.height));
+    }
+
+    if (right <= left || bottom <= top)
+    {
+        left = 0.0;
+        top = 0.0;
+        right = std::max(1.0, static_cast<double>(clientSizeDip_.width));
+        bottom = std::max(1.0, static_cast<double>(clientSizeDip_.height));
+    }
+    else
+    {
+        left = std::max(0.0, left - bleedDip);
+        top = std::max(0.0, top - bleedDip);
+        right = std::min(std::max(1.0, static_cast<double>(clientSizeDip_.width)), right + bleedDip);
+        bottom = std::min(std::max(1.0, static_cast<double>(clientSizeDip_.height)), bottom + bleedDip);
+    }
+
+    visibleOriginDip_ = {static_cast<float>(left), static_cast<float>(top)};
+    visibleBoundsDip_ = {
+        static_cast<float>(std::max(1.0, right - left)),
+        static_cast<float>(std::max(1.0, bottom - top))};
+
+    if (root_)
+    {
+        root_.Width(visibleBoundsDip_.width);
+        root_.Height(visibleBoundsDip_.height);
+    }
+
+    if (layoutCanvas_)
+    {
+        layoutCanvas_.Width(visibleBoundsDip_.width);
+        layoutCanvas_.Height(visibleBoundsDip_.height);
+    }
+
+    if (appSwitcherContainer_)
+    {
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(appSwitcherContainer_, contentOriginDip_.x - visibleOriginDip_.x);
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(appSwitcherContainer_, contentOriginDip_.y - visibleOriginDip_.y);
+        appSwitcherContainer_.Width(contentBoundsDip_.width);
+        appSwitcherContainer_.Height(contentBoundsDip_.height);
+    }
+
+    for (auto& item : items_)
+    {
+        if (!item.root || !item.visible)
+        {
+            continue;
+        }
+
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(item.root, item.layoutPosition.x - visibleOriginDip_.x);
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(item.root, item.layoutPosition.y - visibleOriginDip_.y);
+    }
+
+    if (focusBorder_)
+    {
+        auto firstVisible = std::find_if(items_.begin(), items_.end(), [](const ItemView& item) { return item.visible; });
+        if (firstVisible != items_.end())
+        {
+            constexpr double inflationDip = 10.0;
+            winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(
+                focusBorder_,
+                firstVisible->layoutPosition.x - visibleOriginDip_.x - inflationDip);
+            winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(
+                focusBorder_,
+                firstVisible->layoutPosition.y - visibleOriginDip_.y - inflationDip);
+            focusBorder_.Width(firstVisible->layoutSize.width + inflationDip * 2.0);
+            focusBorder_.Height(firstVisible->layoutSize.height + inflationDip * 2.0);
+            focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+        }
+        else
+        {
+            focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+        }
+    }
+}
+
 void AppSwitcherXamlView::ApplyLayout(
     const std::vector<AppSwitcherWindowItem>& windows,
     UINT widthPx,
@@ -515,13 +644,9 @@ void AppSwitcherXamlView::ApplyLayout(
     contentBoundsDip_ = {
         static_cast<float>(static_cast<double>(layout.totalSizePx.cx) / safeScale),
         static_cast<float>(static_cast<double>(layout.totalSizePx.cy) / safeScale)};
-    if (appSwitcherContainer_)
-    {
-        appSwitcherContainer_.Width(contentBoundsDip_.width);
-        appSwitcherContainer_.Height(contentBoundsDip_.height);
-    }
-    layoutCanvas_.Width(contentBoundsDip_.width);
-    layoutCanvas_.Height(contentBoundsDip_.height);
+    contentOriginDip_ = {
+        static_cast<float>(std::max(0.0, (static_cast<double>(clientSizeDip_.width) - contentBoundsDip_.width) * 0.5)),
+        static_cast<float>(std::max(0.0, (static_cast<double>(clientSizeDip_.height) - contentBoundsDip_.height) * 0.5))};
     if (activeDragItemIndex_ >= windows.size())
     {
         xamlPointerDragging_ = false;
@@ -559,11 +684,12 @@ void AppSwitcherXamlView::ApplyLayout(
         }
         item.hwnd = newHwnd;
         item.visible = true;
-        item.layoutPosition = {static_cast<float>(x), static_cast<float>(y)};
+        item.layoutSize = {static_cast<float>(w), static_cast<float>(h)};
         if (!xamlPointerDragging_ || activeDragItemIndex_ != i)
         {
-            winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(item.root, x);
-            winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(item.root, y);
+            item.layoutPosition = {
+                static_cast<float>(contentOriginDip_.x + x),
+                static_cast<float>(contentOriginDip_.y + y)};
         }
         item.root.Width(w);
         item.root.Height(h);
@@ -647,19 +773,10 @@ void AppSwitcherXamlView::ApplyLayout(
                                   : winrt::Windows::UI::Xaml::Visibility::Collapsed);
     }
 
-    if (focusBorder_ && !layout.items.empty())
+    UpdateVisibleBoundsAndPositions();
+    if (boundsChangedCallback_)
     {
-        const RECT& rect = layout.items.front().rectPx;
-        constexpr double inflationDip = 10.0;
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(
-            focusBorder_,
-            static_cast<double>(rect.left) / safeScale - inflationDip);
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(
-            focusBorder_,
-            static_cast<double>(rect.top) / safeScale - inflationDip);
-        focusBorder_.Width(static_cast<double>(RectWidth(rect)) / safeScale + inflationDip * 2.0);
-        focusBorder_.Height(static_cast<double>(RectHeight(rect)) / safeScale + inflationDip * 2.0);
-        focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+        boundsChangedCallback_();
     }
 }
 

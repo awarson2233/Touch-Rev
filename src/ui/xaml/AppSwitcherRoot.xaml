@@ -2,28 +2,27 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     x:Name="RootGrid"
-    Background="#66000000">
+    Background="Transparent">
 
-    <Border
-        x:Name="AppSwitcherContainer"
-        HorizontalAlignment="Center"
-        VerticalAlignment="Center"
-        Background="#CC181818"
-        BorderBrush="#55FFFFFF"
-        BorderThickness="1"
-        CornerRadius="24">
-        <Canvas x:Name="LayoutCanvas">
-            <Border
-                x:Name="FocusBorder"
-                BorderBrush="#FF4CC2FF"
-                BorderThickness="4"
-                Canvas.ZIndex="100"
-                CornerRadius="20"
-                IsHitTestVisible="False"
-                Visibility="Collapsed"
-                Background="#224CC2FF" />
-        </Canvas>
-    </Border>
+    <Canvas x:Name="LayoutCanvas">
+        <Border
+            x:Name="AppSwitcherContainer"
+            Canvas.ZIndex="0"
+            Background="#CC181818"
+            BorderBrush="#55FFFFFF"
+            BorderThickness="1"
+            CornerRadius="24" />
+
+        <Border
+            x:Name="FocusBorder"
+            BorderBrush="#FF4CC2FF"
+            BorderThickness="4"
+            Canvas.ZIndex="100"
+            CornerRadius="20"
+            IsHitTestVisible="False"
+            Visibility="Collapsed"
+            Background="#224CC2FF" />
+    </Canvas>
 
     <Grid
         x:Name="EmptyGrid"
