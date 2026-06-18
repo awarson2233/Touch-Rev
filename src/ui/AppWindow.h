@@ -12,8 +12,25 @@
 class AppWindow
 {
 public:
+    enum class ActivationCommand : WPARAM
+    {
+        Show = 1,
+        Hide = 2,
+        Toggle = 3,
+        Exit = 4,
+    };
+
+    static constexpr wchar_t WindowClassName[] = L"TouchRevGUI.MainWindow";
+    static constexpr wchar_t WakeMessageName[] = L"TouchRevGUI.Wake";
+    static constexpr wchar_t SingleInstanceMutexName[] = L"Local\\TouchRevGUI.SingleInstance";
+
     bool Initialize(HINSTANCE instance, int showCommand);
     int Run();
+    void ShowSwitcher();
+    void Hide();
+    void ToggleSwitcher();
+    void ExitApplication();
+    bool IsSwitcherVisible() const { return isVisible_; }
 
 private:
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
@@ -27,8 +44,8 @@ private:
     void ApplyBackdropAndBackgroundMode();
     void RefreshTheme();
     void UpdateTransparentRegion();
-    void Hide();
     void ActivateWindow(HWND targetHwnd);
+    bool CloseWindow(HWND targetHwnd);
     void ExpandWindowAroundPoint(HWND targetHwnd, POINT centerPoint);
     void HandleInputResult(const InputController::Result& result);
     bool HandleKeyDown(WPARAM key);
@@ -49,6 +66,9 @@ private:
     RECT targetMonitorRectPx_{};
     RECT targetWorkAreaPx_{};
     float dpi_ = 96.0f;
+    UINT wakeMessage_ = 0;
+    bool isVisible_ = false;
+    bool isExiting_ = false;
 
     BackdropController backdropController_;
     CoordinateSpace coordinates_;

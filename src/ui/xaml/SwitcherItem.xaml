@@ -14,8 +14,8 @@
         CornerRadius="10">
         <Grid x:Name="ItemLayoutGrid">
             <Grid.RowDefinitions>
-                <RowDefinition Height="1.5*" />
-                <RowDefinition Height="8.5*" />
+                <RowDefinition Height="1.6*" />
+                <RowDefinition Height="8.4*" />
             </Grid.RowDefinitions>
 
             <Border

@@ -76,7 +76,7 @@ AppSwitcherLayoutResult AppSwitcherLayoutEngine::Calculate(
         if (!isPortrait)
         {
             const double thumbHeight = static_cast<double>(workHeight) * sn;
-            const double titleHeight = thumbHeight * (TitleRowWeight / ContentRowWeight);
+            const double titleHeight = static_cast<double>(workHeight) * (TitleRowWeight / ContentRowWeight) * 0.30;
             itemHeight = thumbHeight + titleHeight;
             itemWidth = thumbHeight * aspect;
         }

@@ -25,6 +25,7 @@ public:
     void Shutdown();
     void Resize(UINT widthPx, UINT heightPx, double scale);
     void RenderSample(UINT widthPx, UINT heightPx, double scale);
+    void CancelInteraction();
     bool HitTest(PointDip point) const;
     RECT VisibleBoundsPx() const;
     RECT ContainerBoundsPx() const;
@@ -36,6 +37,7 @@ public:
     void SetMissedInputCallback(std::function<void()> callback);
     void SetItemActivatedCallback(std::function<void(HWND)> callback);
     void SetItemDragReleasedCallback(std::function<void(HWND, POINT)> callback);
+    void SetItemCloseRequestedCallback(std::function<bool(HWND)> callback);
     bool MoveSelection(int stepX, int stepY);
     bool MoveSelectionNext();
     bool MoveSelectionPrevious();
@@ -82,6 +84,7 @@ private:
     void ResetInteractionState();
     void BeginGrab(size_t itemIndex);
     void FinishPressedItem(size_t itemIndex, PointDip releasePoint);
+    void HandleItemCloseRequested(size_t itemIndex);
     POINT DipPointToScreenPixel(PointDip point) const;
     void ClearItemThumbnail(ItemView& item);
     void ResetItem(ItemView& item);
@@ -121,6 +124,8 @@ private:
     std::function<void()> missedInputCallback_;
     std::function<void(HWND)> itemActivatedCallback_;
     std::function<void(HWND, POINT)> itemDragReleasedCallback_;
+    std::function<bool(HWND)> itemCloseRequestedCallback_;
+    std::vector<HWND> dismissedHwnds_;
     AppSwitcherPalette palette_ = PaletteForTheme(AppThemeMode::Dark);
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
 };

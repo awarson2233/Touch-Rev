@@ -14,6 +14,7 @@
 #include <winrt/Windows.UI.Input.h>
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
+#include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.UI.Xaml.Hosting.h>
 #include <winrt/Windows.UI.Xaml.Input.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
@@ -340,6 +341,11 @@ void AppSwitcherXamlView::Resize(UINT widthPx, UINT heightPx, double scale)
     RenderSample(widthPx, heightPx, scale);
 }
 
+void AppSwitcherXamlView::CancelInteraction()
+{
+    ResetInteractionState();
+}
+
 bool AppSwitcherXamlView::HitTest(PointDip point) const
 {
     if (!initialized_)
@@ -413,6 +419,11 @@ void AppSwitcherXamlView::SetItemActivatedCallback(std::function<void(HWND)> cal
 void AppSwitcherXamlView::SetItemDragReleasedCallback(std::function<void(HWND, POINT)> callback)
 {
     itemDragReleasedCallback_ = std::move(callback);
+}
+
+void AppSwitcherXamlView::SetItemCloseRequestedCallback(std::function<bool(HWND)> callback)
+{
+    itemCloseRequestedCallback_ = std::move(callback);
 }
 
 bool AppSwitcherXamlView::CanNavigateSelection() const
@@ -821,6 +832,35 @@ void AppSwitcherXamlView::FinishPressedItem(size_t itemIndex, PointDip releasePo
     }
 }
 
+void AppSwitcherXamlView::HandleItemCloseRequested(size_t itemIndex)
+{
+    if (itemIndex >= items_.size())
+    {
+        return;
+    }
+
+    HWND hwnd = items_[itemIndex].hwnd;
+    if (!hwnd)
+    {
+        return;
+    }
+
+    ResetInteractionState();
+    if (!itemCloseRequestedCallback_ || !itemCloseRequestedCallback_(hwnd))
+    {
+        return;
+    }
+
+    if (std::find(dismissedHwnds_.begin(), dismissedHwnds_.end(), hwnd) == dismissedHwnds_.end())
+    {
+        dismissedHwnds_.push_back(hwnd);
+    }
+
+    const UINT widthPx = static_cast<UINT>(std::max(1.0, std::round(static_cast<double>(clientSizeDip_.width) * currentDpiScale_)));
+    const UINT heightPx = static_cast<UINT>(std::max(1.0, std::round(static_cast<double>(clientSizeDip_.height) * currentDpiScale_)));
+    RenderSample(widthPx, heightPx, currentDpiScale_);
+}
+
 POINT AppSwitcherXamlView::DipPointToScreenPixel(PointDip point) const
 {
     POINT clientPoint{
@@ -865,7 +905,22 @@ void AppSwitcherXamlView::RenderSample(UINT widthPx, UINT heightPx, double scale
         static_cast<float>(static_cast<double>(widthPx) / std::max(0.01, scale)),
         static_cast<float>(static_cast<double>(heightPx) / std::max(0.01, scale))};
 
+    dismissedHwnds_.erase(
+        std::remove_if(dismissedHwnds_.begin(), dismissedHwnds_.end(), [](HWND hwnd) {
+            return !IsWindow(hwnd);
+        }),
+        dismissedHwnds_.end());
+
     auto windows = EnumerateSwitcherWindows(hwnd_, targetMonitor_);
+    if (!dismissedHwnds_.empty())
+    {
+        windows.erase(
+            std::remove_if(windows.begin(), windows.end(), [this](const AppSwitcherWindowItem& window) {
+                return std::find(dismissedHwnds_.begin(), dismissedHwnds_.end(), window.hwnd) != dismissedHwnds_.end();
+            }),
+            windows.end());
+    }
+
     std::wstringstream log;
     log << L"EnumerateSwitcherWindows: count=" << windows.size();
     for (const auto& window : windows)
@@ -968,6 +1023,9 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
 
         if (item.closeButton)
         {
+            item.closeButton.Click([this, itemIndex](auto const&, winrt::Windows::UI::Xaml::RoutedEventArgs const&) {
+                HandleItemCloseRequested(itemIndex);
+            });
             item.closeButton.PointerEntered([this, itemIndex](auto const&, auto const&) {
                 if (itemIndex < items_.size() && items_[itemIndex].closeButton)
                 {

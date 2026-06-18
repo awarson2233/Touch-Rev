@@ -4,6 +4,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 project(TouchRevGUI LANGUAGES CXX RC)
 
+option(TOUCHREV_BUILD_BLOCKER "Build TouchRev blocker hook and injector" OFF)
+
 add_executable(TouchRevGUI WIN32
     src/main.cpp
     app.rc
@@ -83,5 +85,9 @@ add_custom_target(copy_touchrev_xaml ALL
         "$<TARGET_FILE_DIR:TouchRevGUI>/xaml"
 )
 add_dependencies(TouchRevGUI copy_touchrev_xaml)
+
+if(TOUCHREV_BUILD_BLOCKER)
+    add_subdirectory(src/blocker)
+endif()
 
 set_property(TARGET TouchRevGUI PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")

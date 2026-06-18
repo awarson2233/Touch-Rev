@@ -34,8 +34,8 @@ public:
 
     static constexpr double ItemGapDip = 32.0;
     static constexpr double PaddingDip = 48.0;
-    static constexpr double TitleRowWeight = 1.5;
-    static constexpr double ContentRowWeight = 8.5;
+    static constexpr double TitleRowWeight = 1.6;
+    static constexpr double ContentRowWeight = 8.4;
     static constexpr double TotalRowWeight = TitleRowWeight + ContentRowWeight;
     static constexpr double MinAspect = 0.4;
     static constexpr double MaxAspect = 2.5;

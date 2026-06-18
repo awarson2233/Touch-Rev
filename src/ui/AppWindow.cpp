@@ -8,7 +8,6 @@
 
 namespace
 {
-constexpr wchar_t kWindowClassName[] = L"TouchRevGUI.MainWindow";
 constexpr wchar_t kWindowTitle[] = L"Touch Rev GUI";
 
 #if defined(WM_DWMCOMPOSITIONCHANGED)
@@ -21,6 +20,12 @@ constexpr UINT kWmDwmCompositionChanged = 0x031E;
 bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
 {
     instance_ = instance;
+    wakeMessage_ = RegisterWindowMessageW(WakeMessageName);
+    if (wakeMessage_ == 0)
+    {
+        DebugLogHResult(L"RegisterWindowMessageW", HResultFromLastError());
+        return false;
+    }
 
     WNDCLASSEXW windowClass = {};
     windowClass.cbSize = sizeof(windowClass);
@@ -33,7 +38,7 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     windowClass.hbrBackground = nullptr;
     windowClass.lpszMenuName = nullptr;
-    windowClass.lpszClassName = kWindowClassName;
+    windowClass.lpszClassName = AppWindow::WindowClassName;
     windowClass.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
 
     if (RegisterClassExW(&windowClass) == 0)
@@ -53,7 +58,7 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
 
     hwnd_ = CreateWindowExW(
         exStyle,
-        kWindowClassName,
+        AppWindow::WindowClassName,
         kWindowTitle,
         style,
         windowRect.left,
@@ -72,6 +77,7 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
     }
 
     ShowWindow(hwnd_, showCommand);
+    isVisible_ = showCommand != SW_HIDE;
     UpdateWindow(hwnd_);
     return true;
 }
@@ -113,6 +119,25 @@ LRESULT CALLBACK AppWindow::WindowProc(HWND hwnd, UINT message, WPARAM wParam, L
 
 LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
+    if (message == wakeMessage_)
+    {
+        switch (static_cast<ActivationCommand>(wParam))
+        {
+        case ActivationCommand::Show:
+            ShowSwitcher();
+            return 0;
+        case ActivationCommand::Hide:
+            Hide();
+            return 0;
+        case ActivationCommand::Toggle:
+            ToggleSwitcher();
+            return 0;
+        case ActivationCommand::Exit:
+            ExitApplication();
+            return 0;
+        }
+    }
+
     switch (message)
     {
     case WM_CREATE:
@@ -287,6 +312,9 @@ HRESULT AppWindow::OnCreate()
         ExpandWindowAroundPoint(targetHwnd, releasePoint);
         Hide();
     });
+    appSwitcherXamlView_.SetItemCloseRequestedCallback([this](HWND targetHwnd) {
+        return CloseWindow(targetHwnd);
+    });
 
     if (!appSwitcherXamlView_.Initialize(hwnd_, xamlHost_))
     {
@@ -378,12 +406,75 @@ void AppWindow::UpdateTransparentRegion()
     SetWindowRgn(hwnd_, nullptr, TRUE);
 }
 
+void AppWindow::ShowSwitcher()
+{
+    if (!hwnd_)
+    {
+        return;
+    }
+
+    targetMonitor_ = ResolveTargetMonitor();
+    const MONITORINFO monitorInfo = LoadMonitorInfo(targetMonitor_);
+    targetMonitorRectPx_ = monitorInfo.rcMonitor;
+    targetWorkAreaPx_ = monitorInfo.rcWork;
+    appSwitcherXamlView_.SetTargetMonitor(targetMonitor_);
+
+    const RECT windowRect = targetMonitorRectPx_;
+    SetWindowPos(
+        hwnd_,
+        HWND_TOP,
+        windowRect.left,
+        windowRect.top,
+        windowRect.right - windowRect.left,
+        windowRect.bottom - windowRect.top,
+        SWP_SHOWWINDOW);
+
+    dpi_ = static_cast<float>(GetDpiForWindow(hwnd_));
+    const UINT clientWidth = GetClientWidth(hwnd_);
+    const UINT clientHeight = GetClientHeight(hwnd_);
+    coordinates_.Update(dpi_, clientWidth, clientHeight);
+    xamlHost_.Resize(clientWidth, clientHeight);
+    appSwitcherXamlView_.RenderSample(clientWidth, clientHeight, coordinates_.Scale());
+    UpdateTransparentRegion();
+    RefreshTheme();
+    ShowWindow(hwnd_, SW_SHOW);
+    SetForegroundWindow(hwnd_);
+    isVisible_ = true;
+}
+
 void AppWindow::Hide()
 {
-    if (hwnd_)
+    if (!hwnd_ || !isVisible_)
     {
-        DestroyWindow(hwnd_);
+        return;
     }
+
+    inputController_.Cancel(hwnd_);
+    appSwitcherXamlView_.CancelInteraction();
+    ShowWindow(hwnd_, SW_HIDE);
+    isVisible_ = false;
+}
+
+void AppWindow::ToggleSwitcher()
+{
+    if (isVisible_)
+    {
+        Hide();
+        return;
+    }
+
+    ShowSwitcher();
+}
+
+void AppWindow::ExitApplication()
+{
+    if (!hwnd_)
+    {
+        return;
+    }
+
+    isExiting_ = true;
+    DestroyWindow(hwnd_);
 }
 
 void AppWindow::ActivateWindow(HWND targetHwnd)
@@ -392,6 +483,22 @@ void AppWindow::ActivateWindow(HWND targetHwnd)
     {
         SetForegroundWindow(targetHwnd);
     }
+}
+
+bool AppWindow::CloseWindow(HWND targetHwnd)
+{
+    if (!IsWindow(targetHwnd))
+    {
+        return false;
+    }
+
+    if (PostMessageW(targetHwnd, WM_CLOSE, 0, 0))
+    {
+        return true;
+    }
+
+    DebugLogHResult(L"PostMessageW(WM_CLOSE)", HResultFromLastError());
+    return false;
 }
 
 void AppWindow::ExpandWindowAroundPoint(HWND targetHwnd, POINT centerPoint)
