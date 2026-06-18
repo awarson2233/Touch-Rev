@@ -84,6 +84,8 @@ add_executable(RawTouchInputViewer WIN32
     src/tools/RawTouchInputViewer.cpp
     src/input/raw/RawTouchInput.cpp
     src/input/raw/RawTouchInput.h
+    src/input/gesture/ThreeFingerGestureRecognizer.cpp
+    src/input/gesture/ThreeFingerGestureRecognizer.h
     src/common/Win32Error.cpp
     src/common/Win32Error.h
 )

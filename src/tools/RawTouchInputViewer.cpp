@@ -1,4 +1,5 @@
 #include "input/raw/RawTouchInput.h"
+#include "input/gesture/ThreeFingerGestureRecognizer.h"
 
 #include <windows.h>
 
@@ -15,6 +16,8 @@ constexpr int kMargin = 16;
 constexpr int kHeaderHeight = 56;
 constexpr int kRowHeight = 24;
 constexpr int kColumnCount = 8;
+constexpr UINT_PTR kGestureTimerId = 1;
+constexpr UINT kGestureTimerMs = 16;
 
 const int kColumnWidths[kColumnCount] = {54, 96, 72, 86, 86, 86, 86, 132};
 const wchar_t* kHeaders[kColumnCount] = {L"ID", L"State", L"Active", L"X", L"Y", L"Width", L"Height", L"Timestamp"};
@@ -119,12 +122,22 @@ private:
         {
         case WM_CREATE:
             rawTouchInput_.Initialize(hwnd_);
+            SetTimer(hwnd_, kGestureTimerId, kGestureTimerMs, nullptr);
             return 0;
 
         case WM_INPUT:
             ApplyFrame(rawTouchInput_.ProcessRawInput(lParam));
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
+
+        case WM_TIMER:
+            if (wParam == kGestureTimerId)
+            {
+                ApplyGestureResult(gestureRecognizer_.Tick());
+                InvalidateRect(hwnd_, nullptr, FALSE);
+                return 0;
+            }
+            break;
 
         case WM_KEYDOWN:
             if (wParam == VK_ESCAPE)
@@ -144,6 +157,7 @@ private:
             return 0;
 
         case WM_DESTROY:
+            KillTimer(hwnd_, kGestureTimerId);
             PostQuitMessage(0);
             return 0;
         }
@@ -157,6 +171,8 @@ private:
         {
             return;
         }
+
+        ApplyGestureResult(gestureRecognizer_.ProcessFrame(frame));
 
         lastContactCount_ = frame.contactCount;
         lastReceivedCount_ = frame.receivedCount;
@@ -184,6 +200,16 @@ private:
         }
     }
 
+    void ApplyGestureResult(const ThreeFingerGestureRecognizer::Result& result)
+    {
+        lastGestureResult_ = result;
+        if (result.type != ThreeFingerGestureRecognizer::EventType::None)
+        {
+            lastGestureType_ = result.type;
+            lastGestureDirection_ = result.direction;
+        }
+    }
+
     void ClearRows()
     {
         rows_.fill(RowState{});
@@ -194,6 +220,10 @@ private:
         lastFrameTimestamp_ = 0;
         frameCount_ = 0;
         rawTouchInput_.Reset();
+        gestureRecognizer_.Reset();
+        lastGestureResult_ = {};
+        lastGestureType_ = ThreeFingerGestureRecognizer::EventType::None;
+        lastGestureDirection_ = ThreeFingerGestureRecognizer::Direction::None;
         InvalidateRect(hwnd_, nullptr, TRUE);
     }
 
@@ -240,8 +270,29 @@ private:
             lastRemainingCount_,
             lastFrameSync_ ? L"true" : L"false",
             static_cast<long long>(lastFrameTimestamp_));
-        RECT titleRect{kMargin, kMargin, client.right - kMargin, kMargin + 28};
+        RECT titleRect{kMargin, kMargin, client.right - kMargin, kMargin + 24};
         DrawTextW(hdc, title, -1, &titleRect, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+
+        wchar_t gestureText[256]{};
+        std::swprintf(
+            gestureText,
+            std::size(gestureText),
+            L"Gesture=%s   Last=%s   Direction=%s   Delta=(%.0f, %.0f)   3F=%s   SameHand=%s   Center=(%.0f, %.0f)   D=(%.0f/%.0f/%.0f)   Spread=%.2f",
+            GestureTypeText(lastGestureResult_.type),
+            GestureTypeText(lastGestureType_),
+            DirectionText(lastGestureDirection_),
+            lastGestureResult_.delta.x,
+            lastGestureResult_.delta.y,
+            lastGestureResult_.threeFingerActive ? L"true" : L"false",
+            lastGestureResult_.sameHand ? L"true" : L"false",
+            lastGestureResult_.center.x,
+            lastGestureResult_.center.y,
+            lastGestureResult_.distances.d01,
+            lastGestureResult_.distances.d02,
+            lastGestureResult_.distances.d12,
+            lastGestureResult_.distances.spreadRatio);
+        RECT gestureRect{kMargin, kMargin + 24, client.right - kMargin, kMargin + 50};
+        DrawTextW(hdc, gestureText, -1, &gestureRect, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
 
         const int tableLeft = kMargin;
         const int tableTop = kHeaderHeight;
@@ -319,6 +370,44 @@ private:
         }
     }
 
+    static const wchar_t* GestureTypeText(ThreeFingerGestureRecognizer::EventType type)
+    {
+        switch (type)
+        {
+        case ThreeFingerGestureRecognizer::EventType::LongPressStarted:
+            return L"LongPressStarted";
+        case ThreeFingerGestureRecognizer::EventType::LongPressHolding:
+            return L"LongPressHolding";
+        case ThreeFingerGestureRecognizer::EventType::LongPressMoved:
+            return L"LongPressMoved";
+        case ThreeFingerGestureRecognizer::EventType::LongPressEnded:
+            return L"LongPressEnded";
+        case ThreeFingerGestureRecognizer::EventType::DoubleTap:
+            return L"DoubleTap";
+        case ThreeFingerGestureRecognizer::EventType::None:
+        default:
+            return L"None";
+        }
+    }
+
+    static const wchar_t* DirectionText(ThreeFingerGestureRecognizer::Direction direction)
+    {
+        switch (direction)
+        {
+        case ThreeFingerGestureRecognizer::Direction::Up:
+            return L"Up";
+        case ThreeFingerGestureRecognizer::Direction::Down:
+            return L"Down";
+        case ThreeFingerGestureRecognizer::Direction::Left:
+            return L"Left";
+        case ThreeFingerGestureRecognizer::Direction::Right:
+            return L"Right";
+        case ThreeFingerGestureRecognizer::Direction::None:
+        default:
+            return L"None";
+        }
+    }
+
     static int TotalTableWidth()
     {
         int width = 0;
@@ -332,6 +421,10 @@ private:
     HWND hwnd_ = nullptr;
     HINSTANCE instance_ = nullptr;
     RawTouchInput rawTouchInput_;
+    ThreeFingerGestureRecognizer gestureRecognizer_;
+    ThreeFingerGestureRecognizer::Result lastGestureResult_{};
+    ThreeFingerGestureRecognizer::EventType lastGestureType_ = ThreeFingerGestureRecognizer::EventType::None;
+    ThreeFingerGestureRecognizer::Direction lastGestureDirection_ = ThreeFingerGestureRecognizer::Direction::None;
     std::array<RowState, kMaxRows> rows_{};
     int lastContactCount_ = 0;
     int lastReceivedCount_ = 0;
