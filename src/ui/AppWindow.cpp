@@ -145,6 +145,14 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         ApplyBackdropAndBackgroundMode();
         return 0;
 
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        if (HandleKeyDown(wParam))
+        {
+            return 0;
+        }
+        break;
+
     case WM_POINTERDOWN:
     {
         const bool canStartDrag = CanStartDragFromPointer(wParam);
@@ -457,6 +465,41 @@ void AppWindow::HandleInputResult(const InputController::Result& result)
     {
         appSwitcherXamlView_.SetDragPosition(result.position);
     }
+}
+
+bool AppWindow::HandleKeyDown(WPARAM key)
+{
+    switch (key)
+    {
+    case VK_ESCAPE:
+        Hide();
+        return true;
+
+    case VK_RETURN:
+    case VK_SPACE:
+        return appSwitcherXamlView_.ActivateSelectedItem();
+
+    case VK_TAB:
+        if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
+        {
+            return appSwitcherXamlView_.MoveSelectionPrevious();
+        }
+        return appSwitcherXamlView_.MoveSelectionNext();
+
+    case VK_LEFT:
+        return appSwitcherXamlView_.MoveSelection(-1, 0);
+
+    case VK_RIGHT:
+        return appSwitcherXamlView_.MoveSelection(1, 0);
+
+    case VK_UP:
+        return appSwitcherXamlView_.MoveSelection(0, -1);
+
+    case VK_DOWN:
+        return appSwitcherXamlView_.MoveSelection(0, 1);
+    }
+
+    return false;
 }
 
 HMONITOR AppWindow::ResolveTargetMonitor() const

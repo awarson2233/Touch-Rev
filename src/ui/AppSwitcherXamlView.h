@@ -36,6 +36,10 @@ public:
     void SetMissedInputCallback(std::function<void()> callback);
     void SetItemActivatedCallback(std::function<void(HWND)> callback);
     void SetItemDragReleasedCallback(std::function<void(HWND, POINT)> callback);
+    bool MoveSelection(int stepX, int stepY);
+    bool MoveSelectionNext();
+    bool MoveSelectionPrevious();
+    bool ActivateSelectedItem();
 
 private:
     struct ItemView
@@ -68,6 +72,10 @@ private:
     void ApplyLayout(const std::vector<AppSwitcherWindowItem>& windows, UINT widthPx, UINT heightPx, double scale);
     void AttachPointerHandlers();
     void UpdateVisibleBoundsAndPositions();
+    void EnsureSelectedIndex();
+    void UpdateSelectionVisual();
+    bool CanNavigateSelection() const;
+    bool SetSelectedIndex(size_t index);
     void ApplyItemTheme(ItemView& item);
     void ApplyItemRowWeights(ItemView& item);
     void ApplyItemInteractionState(ItemView& item);
@@ -104,6 +112,7 @@ private:
     bool xamlPointerPressed_ = false;
     size_t activeDragItemIndex_ = static_cast<size_t>(-1);
     size_t pressedItemIndex_ = static_cast<size_t>(-1);
+    size_t selectedItemIndex_ = static_cast<size_t>(-1);
     PointDip pressPointDip_{};
     double xamlDragOffsetX_ = 0.0;
     double xamlDragOffsetY_ = 0.0;

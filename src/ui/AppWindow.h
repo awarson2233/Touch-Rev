@@ -31,6 +31,7 @@ private:
     void ActivateWindow(HWND targetHwnd);
     void ExpandWindowAroundPoint(HWND targetHwnd, POINT centerPoint);
     void HandleInputResult(const InputController::Result& result);
+    bool HandleKeyDown(WPARAM key);
     HMONITOR ResolveTargetMonitor() const;
     MONITORINFO LoadMonitorInfo(HMONITOR monitor) const;
 

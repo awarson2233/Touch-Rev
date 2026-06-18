@@ -22,6 +22,7 @@
 #include <algorithm>
 #include <cmath>
 #include <fstream>
+#include <limits>
 #include <sstream>
 #include <utility>
 
@@ -127,6 +128,22 @@ std::wstring GetWindowDisplayTitle(HWND hwnd)
     return fallback.str();
 }
 
+bool TryGetSwitcherWindowRect(HWND hwnd, RECT& rect)
+{
+    if (IsIconic(hwnd))
+    {
+        WINDOWPLACEMENT placement{};
+        placement.length = sizeof(placement);
+        if (GetWindowPlacement(hwnd, &placement))
+        {
+            rect = placement.rcNormalPosition;
+            return rect.right > rect.left && rect.bottom > rect.top;
+        }
+    }
+
+    return GetWindowRect(hwnd, &rect) && rect.right > rect.left && rect.bottom > rect.top;
+}
+
 bool IsAltTabLikeWindow(HWND hwnd)
 {
     if (!IsWindowVisible(hwnd))
@@ -147,7 +164,7 @@ bool IsAltTabLikeWindow(HWND hwnd)
     }
 
     RECT rect{};
-    if (!GetWindowRect(hwnd, &rect))
+    if (!TryGetSwitcherWindowRect(hwnd, rect))
     {
         return false;
     }
@@ -155,14 +172,13 @@ bool IsAltTabLikeWindow(HWND hwnd)
     return rect.right - rect.left >= 80 && rect.bottom - rect.top >= 60;
 }
 
-std::vector<AppSwitcherWindowItem> EnumerateSwitcherWindows(HWND excludeHwnd, HMONITOR targetMonitor)
+std::vector<AppSwitcherWindowItem> EnumerateSwitcherWindows(HWND excludeHwnd, HMONITOR)
 {
     struct EnumState
     {
         HWND exclude = nullptr;
-        HMONITOR targetMonitor = nullptr;
         std::vector<AppSwitcherWindowItem> windows;
-    } state{excludeHwnd, targetMonitor};
+    } state{excludeHwnd};
 
     EnumWindows(
         [](HWND hwnd, LPARAM param) -> BOOL {
@@ -173,8 +189,7 @@ std::vector<AppSwitcherWindowItem> EnumerateSwitcherWindows(HWND excludeHwnd, HM
             }
 
             RECT rect{};
-            GetWindowRect(hwnd, &rect);
-            if (!WindowBelongsToMonitor(rect, state.targetMonitor))
+            if (!TryGetSwitcherWindowRect(hwnd, rect))
             {
                 return TRUE;
             }
@@ -184,7 +199,7 @@ std::vector<AppSwitcherWindowItem> EnumerateSwitcherWindows(HWND excludeHwnd, HM
                 static_cast<double>(std::max<LONG>(1, rect.right - rect.left)),
                 static_cast<double>(std::max<LONG>(1, rect.bottom - rect.top)),
                 GetWindowDisplayTitle(hwnd)});
-            return state.windows.size() < 12;
+            return TRUE;
         },
         reinterpret_cast<LPARAM>(&state));
 
@@ -398,6 +413,191 @@ void AppSwitcherXamlView::SetItemActivatedCallback(std::function<void(HWND)> cal
 void AppSwitcherXamlView::SetItemDragReleasedCallback(std::function<void(HWND, POINT)> callback)
 {
     itemDragReleasedCallback_ = std::move(callback);
+}
+
+bool AppSwitcherXamlView::CanNavigateSelection() const
+{
+    return initialized_ && !xamlPointerPressed_ && !xamlPointerDragging_;
+}
+
+bool AppSwitcherXamlView::SetSelectedIndex(size_t index)
+{
+    if (index >= items_.size() || !items_[index].visible)
+    {
+        return false;
+    }
+
+    selectedItemIndex_ = index;
+    UpdateSelectionVisual();
+    return true;
+}
+
+bool AppSwitcherXamlView::MoveSelectionNext()
+{
+    if (!CanNavigateSelection())
+    {
+        return false;
+    }
+
+    EnsureSelectedIndex();
+    if (selectedItemIndex_ == static_cast<size_t>(-1))
+    {
+        return false;
+    }
+
+    for (size_t i = selectedItemIndex_ + 1; i < items_.size(); ++i)
+    {
+        if (items_[i].visible)
+        {
+            return SetSelectedIndex(i);
+        }
+    }
+
+    for (size_t i = 0; i < selectedItemIndex_; ++i)
+    {
+        if (items_[i].visible)
+        {
+            return SetSelectedIndex(i);
+        }
+    }
+
+    return false;
+}
+
+bool AppSwitcherXamlView::MoveSelectionPrevious()
+{
+    if (!CanNavigateSelection())
+    {
+        return false;
+    }
+
+    EnsureSelectedIndex();
+    if (selectedItemIndex_ == static_cast<size_t>(-1))
+    {
+        return false;
+    }
+
+    for (size_t i = selectedItemIndex_; i > 0; --i)
+    {
+        const size_t candidate = i - 1;
+        if (items_[candidate].visible)
+        {
+            return SetSelectedIndex(candidate);
+        }
+    }
+
+    for (size_t i = items_.size(); i > selectedItemIndex_ + 1; --i)
+    {
+        const size_t candidate = i - 1;
+        if (items_[candidate].visible)
+        {
+            return SetSelectedIndex(candidate);
+        }
+    }
+
+    return false;
+}
+
+bool AppSwitcherXamlView::MoveSelection(int stepX, int stepY)
+{
+    if (!CanNavigateSelection() || (stepX == 0 && stepY == 0))
+    {
+        return false;
+    }
+
+    EnsureSelectedIndex();
+    if (selectedItemIndex_ == static_cast<size_t>(-1) || selectedItemIndex_ >= items_.size())
+    {
+        return false;
+    }
+
+    const auto& current = items_[selectedItemIndex_];
+    const double currentCenterX = current.layoutPosition.x + current.layoutSize.width * 0.5;
+    const double currentCenterY = current.layoutPosition.y + current.layoutSize.height * 0.5;
+    size_t bestIndex = static_cast<size_t>(-1);
+    double bestDistance = std::numeric_limits<double>::max();
+
+    for (size_t i = 0; i < items_.size(); ++i)
+    {
+        if (i == selectedItemIndex_ || !items_[i].visible)
+        {
+            continue;
+        }
+
+        const auto& candidate = items_[i];
+        const double candidateCenterX = candidate.layoutPosition.x + candidate.layoutSize.width * 0.5;
+        const double candidateCenterY = candidate.layoutPosition.y + candidate.layoutSize.height * 0.5;
+        const double dx = candidateCenterX - currentCenterX;
+        const double dy = candidateCenterY - currentCenterY;
+        bool matchesDirection = false;
+
+        if (stepX > 0 && dx > 10.0 && std::abs(dy) < candidate.layoutSize.height)
+        {
+            matchesDirection = true;
+        }
+        else if (stepX < 0 && dx < -10.0 && std::abs(dy) < candidate.layoutSize.height)
+        {
+            matchesDirection = true;
+        }
+        else if (stepY > 0 && dy > 10.0 && std::abs(dx) < candidate.layoutSize.width)
+        {
+            matchesDirection = true;
+        }
+        else if (stepY < 0 && dy < -10.0 && std::abs(dx) < candidate.layoutSize.width)
+        {
+            matchesDirection = true;
+        }
+
+        if (!matchesDirection)
+        {
+            continue;
+        }
+
+        const double distance = dx * dx + dy * dy;
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            bestIndex = i;
+        }
+    }
+
+    if (bestIndex != static_cast<size_t>(-1))
+    {
+        return SetSelectedIndex(bestIndex);
+    }
+
+    if (stepX > 0)
+    {
+        return MoveSelectionNext();
+    }
+    if (stepX < 0)
+    {
+        return MoveSelectionPrevious();
+    }
+    return false;
+}
+
+bool AppSwitcherXamlView::ActivateSelectedItem()
+{
+    if (!CanNavigateSelection())
+    {
+        return false;
+    }
+
+    EnsureSelectedIndex();
+    if (selectedItemIndex_ == static_cast<size_t>(-1) || selectedItemIndex_ >= items_.size())
+    {
+        return false;
+    }
+
+    HWND hwnd = items_[selectedItemIndex_].hwnd;
+    if (!hwnd || !itemActivatedCallback_)
+    {
+        return false;
+    }
+
+    itemActivatedCallback_(hwnd);
+    return true;
 }
 
 void AppSwitcherXamlView::AttachPointerHandlers()
@@ -794,6 +994,7 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
             const PointDip logicalPoint{
                 static_cast<float>(point.X + visibleOriginDip_.x),
                 static_cast<float>(point.Y + visibleOriginDip_.y)};
+            selectedItemIndex_ = itemIndex;
             pressedItemIndex_ = itemIndex;
             activeDragItemIndex_ = itemIndex;
             xamlPointerPressed_ = true;
@@ -923,33 +1124,53 @@ void AppSwitcherXamlView::UpdateVisibleBoundsAndPositions()
         winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(item.root, item.layoutPosition.y);
     }
 
-    if (focusBorder_)
+    EnsureSelectedIndex();
+    UpdateSelectionVisual();
+}
+
+void AppSwitcherXamlView::EnsureSelectedIndex()
+{
+    if (selectedItemIndex_ < items_.size() && items_[selectedItemIndex_].visible)
     {
-        if (xamlPointerDragging_)
+        return;
+    }
+
+    selectedItemIndex_ = static_cast<size_t>(-1);
+    for (size_t i = 0; i < items_.size(); ++i)
+    {
+        if (items_[i].visible)
         {
-            focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+            selectedItemIndex_ = i;
             return;
         }
-
-        auto firstVisible = std::find_if(items_.begin(), items_.end(), [](const ItemView& item) { return item.visible; });
-        if (firstVisible != items_.end())
-        {
-            constexpr double inflationDip = 10.0;
-            winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(
-                focusBorder_,
-                firstVisible->layoutPosition.x - inflationDip);
-            winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(
-                focusBorder_,
-                firstVisible->layoutPosition.y - inflationDip);
-            focusBorder_.Width(firstVisible->layoutSize.width + inflationDip * 2.0);
-            focusBorder_.Height(firstVisible->layoutSize.height + inflationDip * 2.0);
-            focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
-        }
-        else
-        {
-            focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
-        }
     }
+}
+
+void AppSwitcherXamlView::UpdateSelectionVisual()
+{
+    if (!focusBorder_)
+    {
+        return;
+    }
+
+    if (xamlPointerDragging_ || selectedItemIndex_ == static_cast<size_t>(-1) ||
+        selectedItemIndex_ >= items_.size() || !items_[selectedItemIndex_].visible)
+    {
+        focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+        return;
+    }
+
+    const auto& selectedItem = items_[selectedItemIndex_];
+    constexpr double inflationDip = 10.0;
+    winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(
+        focusBorder_,
+        selectedItem.layoutPosition.x - inflationDip);
+    winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(
+        focusBorder_,
+        selectedItem.layoutPosition.y - inflationDip);
+    focusBorder_.Width(selectedItem.layoutSize.width + inflationDip * 2.0);
+    focusBorder_.Height(selectedItem.layoutSize.height + inflationDip * 2.0);
+    focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
 }
 
 void AppSwitcherXamlView::ApplyLayout(
