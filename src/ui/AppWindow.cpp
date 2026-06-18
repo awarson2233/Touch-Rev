@@ -178,6 +178,10 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
 
+    case WM_INPUT:
+        inputController_.OnRawInput(lParam);
+        return 0;
+
     case WM_POINTERDOWN:
     {
         const bool canStartDrag = CanStartDragFromPointer(wParam);

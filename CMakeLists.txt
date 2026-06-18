@@ -30,6 +30,8 @@ add_executable(TouchRevGUI WIN32
     src/common/CoordinateSpace.h
     src/input/InputController.cpp
     src/input/InputController.h
+    src/input/raw/RawTouchInput.cpp
+    src/input/raw/RawTouchInput.h
     src/common/Win32Error.cpp
     src/common/Win32Error.h
 )
@@ -71,10 +73,50 @@ target_link_libraries(TouchRevGUI PRIVATE
     ole32
     runtimeobject
     advapi32
+    hid
 )
 
 if(NOT MSVC)
     target_link_libraries(TouchRevGUI PRIVATE uuid)
+endif()
+
+add_executable(RawTouchInputViewer WIN32
+    src/tools/RawTouchInputViewer.cpp
+    src/input/raw/RawTouchInput.cpp
+    src/input/raw/RawTouchInput.h
+    src/common/Win32Error.cpp
+    src/common/Win32Error.h
+)
+
+target_compile_features(RawTouchInputViewer PRIVATE cxx_std_20)
+target_include_directories(RawTouchInputViewer PRIVATE src)
+target_compile_definitions(RawTouchInputViewer PRIVATE
+    UNICODE
+    _UNICODE
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+    _WIN32_WINNT=0x0A00
+    NTDDI_VERSION=0x0A000000
+)
+
+if(MSVC)
+    target_compile_options(RawTouchInputViewer PRIVATE /W4 /permissive- /Zc:__cplusplus /EHsc)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(RawTouchInputViewer PRIVATE -Wno-nonportable-include-path)
+endif()
+
+target_link_libraries(RawTouchInputViewer PRIVATE
+    user32
+    gdi32
+    hid
+)
+
+if(MINGW)
+    target_link_options(RawTouchInputViewer PRIVATE -municode)
+endif()
+
+if(NOT MSVC)
+    target_link_libraries(RawTouchInputViewer PRIVATE uuid)
 endif()
 
 add_custom_target(copy_touchrev_xaml ALL

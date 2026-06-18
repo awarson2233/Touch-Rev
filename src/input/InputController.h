@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/CoordinateSpace.h"
+#include "input/raw/RawTouchInput.h"
 
 #include <windows.h>
 
@@ -31,6 +32,7 @@ public:
     Result OnMouseUp(HWND hwnd);
 
     Result OnTouch(HWND hwnd, WPARAM wParam, LPARAM lParam, const CoordinateSpace& coordinates, PointDip currentPosition, bool canStartDrag);
+    RawTouchInput::Frame OnRawInput(LPARAM lParam);
 
     bool IsDragging() const { return pointerDragging_ || mouseDragging_ || touchDragging_; }
     PointDip EvaluateVisualPosition() const;
@@ -63,6 +65,7 @@ private:
     float dragOffsetX_ = 0.0f;
     float dragOffsetY_ = 0.0f;
     PointDip currentPosition_{};
+    RawTouchInput rawTouchInput_;
     PointerSample previousSample_{};
     PointerSample latestSample_{};
     float smoothedVelocityX_ = 0.0f;

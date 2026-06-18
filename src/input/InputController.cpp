@@ -47,6 +47,8 @@ void InputController::Initialize(HWND hwnd)
     {
         DebugLog(L"RegisterTouchWindow failed; WM_POINTER remains the primary touch path.");
     }
+
+    rawTouchInput_.Initialize(hwnd);
 }
 
 void InputController::Cancel(HWND hwnd)
@@ -63,6 +65,7 @@ void InputController::Cancel(HWND hwnd)
     activeTouchId_ = 0;
     dragOffsetX_ = 0.0f;
     dragOffsetY_ = 0.0f;
+    rawTouchInput_.Reset();
     ResetSamples();
 }
 
@@ -221,6 +224,11 @@ InputController::Result InputController::OnTouch(
 
     CloseTouchInputHandle(reinterpret_cast<HTOUCHINPUT>(lParam));
     return result;
+}
+
+RawTouchInput::Frame InputController::OnRawInput(LPARAM lParam)
+{
+    return rawTouchInput_.ProcessRawInput(lParam);
 }
 
 PointDip InputController::EvaluateVisualPosition() const
