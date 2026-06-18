@@ -185,6 +185,38 @@ PrivateThumbnailSlot PrivateThumbnailManager::CreateForWindow(
     return slot;
 }
 
+void PrivateThumbnailManager::ClearSlot(
+    winrt::Windows::UI::Xaml::FrameworkElement const& hostElement,
+    PrivateThumbnailSlot& slot)
+{
+    using namespace winrt::Windows::UI::Xaml::Hosting;
+
+    if (hostElement)
+    {
+        ElementCompositionPreview::SetElementChildVisual(hostElement, nullptr);
+    }
+
+    if (slot.wrapperVisual)
+    {
+        slot.wrapperVisual.Children().RemoveAll();
+    }
+
+    slot.visual = nullptr;
+    slot.geometricClip = nullptr;
+    slot.clipGeometry = nullptr;
+    slot.wrapperVisual = nullptr;
+    slot.duplicateVisual = nullptr;
+    slot.visualFactory = nullptr;
+    slot.factoryInspectable = nullptr;
+    slot.hwnd = nullptr;
+    slot.lastError = S_OK;
+    slot.displayWidthDip = 0.0;
+    slot.displayHeightDip = 0.0;
+    slot.createWidthDip = 0.0;
+    slot.createHeightDip = 0.0;
+    slot.dpiScale = 1.0;
+}
+
 void PrivateThumbnailManager::ResizeSlot(PrivateThumbnailSlot& slot, double widthDip, double heightDip)
 {
     if (!slot.wrapperVisual || !slot.visual)

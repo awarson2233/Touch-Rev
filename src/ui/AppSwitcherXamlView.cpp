@@ -203,6 +203,10 @@ bool AppSwitcherXamlView::Initialize(HWND hwnd, ThinXamlAppSwitcherHost& host)
 
 void AppSwitcherXamlView::Shutdown()
 {
+    for (auto& item : items_)
+    {
+        ResetItem(item);
+    }
     items_.clear();
     appSwitcherContainer_ = nullptr;
     layoutCanvas_ = nullptr;
@@ -238,6 +242,30 @@ void AppSwitcherXamlView::SetDragPosition(PointDip position)
 void AppSwitcherXamlView::AttachPointerHandlers()
 {
     // Item-level pointer handlers are attached when SwitcherItem instances are created.
+}
+
+void AppSwitcherXamlView::ClearItemThumbnail(ItemView& item)
+{
+    if (item.thumbnailSlot)
+    {
+        touchrev::thumbnail::PrivateThumbnailManager::ClearSlot(item.thumbnailHost, *item.thumbnailSlot);
+        item.thumbnailSlot.reset();
+    }
+    else if (item.thumbnailHost)
+    {
+        winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(item.thumbnailHost, nullptr);
+    }
+
+    item.thumbnailError = S_OK;
+    item.thumbnailFailed = false;
+}
+
+void AppSwitcherXamlView::ResetItem(ItemView& item)
+{
+    ClearItemThumbnail(item);
+    item.hwnd = nullptr;
+    item.layoutPosition = {};
+    item.visible = false;
 }
 
 void AppSwitcherXamlView::RenderSample(UINT widthPx, UINT heightPx, double scale)
@@ -412,12 +440,7 @@ void AppSwitcherXamlView::ApplyLayout(
                                  : winrt::Windows::UI::Xaml::Visibility::Collapsed);
         if (!visible)
         {
-            if (item.thumbnailHost)
-            {
-                winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(item.thumbnailHost, nullptr);
-            }
-            item.hwnd = nullptr;
-            item.thumbnailSlot.reset();
+            ResetItem(item);
             continue;
         }
 
@@ -427,7 +450,13 @@ void AppSwitcherXamlView::ApplyLayout(
         const double w = static_cast<double>(RectWidth(rect)) / safeScale;
         const double h = static_cast<double>(RectHeight(rect)) / safeScale;
 
-        item.hwnd = windows[i].hwnd;
+        const HWND newHwnd = windows[i].hwnd;
+        if (item.hwnd != nullptr && item.hwnd != newHwnd)
+        {
+            ClearItemThumbnail(item);
+        }
+        item.hwnd = newHwnd;
+        item.visible = true;
         item.layoutPosition = {static_cast<float>(x), static_cast<float>(y)};
         if (!xamlPointerDragging_ || activeDragItemIndex_ != i)
         {
@@ -467,22 +496,39 @@ void AppSwitcherXamlView::ApplyLayout(
             const double thumbnailHeight = ResolveActualSize(item.thumbnailHost.ActualHeight(), fallbackThumbnailHeight);
             ApplyContentClip(item.thumbnailHost, thumbnailWidth, thumbnailHeight);
 
-            if (!item.thumbnailSlot || ShouldRecreateThumbnail(
-                                           *item.thumbnailSlot,
-                                           windows[i].hwnd,
-                                           thumbnailWidth,
-                                           thumbnailHeight,
-                                           currentDpiScale_))
+            const bool needsThumbnail = !item.thumbnailSlot || ShouldRecreateThumbnail(
+                                                                  *item.thumbnailSlot,
+                                                                  newHwnd,
+                                                                  thumbnailWidth,
+                                                                  thumbnailHeight,
+                                                                  currentDpiScale_);
+            if (needsThumbnail && !item.thumbnailFailed)
             {
-                item.thumbnailSlot = std::make_unique<touchrev::thumbnail::PrivateThumbnailSlot>(
-                    thumbnailManager_.CreateForWindow(
-                        windows[i].hwnd,
-                        item.thumbnailHost,
-                        thumbnailWidth,
-                        thumbnailHeight,
-                        currentDpiScale_));
+                if (item.thumbnailSlot)
+                {
+                    ClearItemThumbnail(item);
+                }
+
+                auto slot = thumbnailManager_.CreateForWindow(
+                    newHwnd,
+                    item.thumbnailHost,
+                    thumbnailWidth,
+                    thumbnailHeight,
+                    currentDpiScale_);
+                if (slot)
+                {
+                    item.thumbnailSlot = std::make_unique<touchrev::thumbnail::PrivateThumbnailSlot>(std::move(slot));
+                    item.thumbnailError = S_OK;
+                    item.thumbnailFailed = false;
+                }
+                else
+                {
+                    item.thumbnailError = slot.lastError;
+                    item.thumbnailFailed = true;
+                    item.thumbnailSlot.reset();
+                }
             }
-            else
+            else if (item.thumbnailSlot)
             {
                 touchrev::thumbnail::PrivateThumbnailManager::ResizeSlot(
                     *item.thumbnailSlot,

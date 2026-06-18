@@ -46,6 +46,9 @@ public:
         double dpiScale);
 
     static void ResizeSlot(PrivateThumbnailSlot& slot, double widthDip, double heightDip);
+    static void ClearSlot(
+        winrt::Windows::UI::Xaml::FrameworkElement const& hostElement,
+        PrivateThumbnailSlot& slot);
 
 private:
     winrt::com_ptr<IInspectable> deviceInspectable_;

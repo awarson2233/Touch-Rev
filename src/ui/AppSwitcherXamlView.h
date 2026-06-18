@@ -37,6 +37,9 @@ private:
         HWND hwnd = nullptr;
         PointDip layoutPosition{};
         std::unique_ptr<touchrev::thumbnail::PrivateThumbnailSlot> thumbnailSlot;
+        HRESULT thumbnailError = S_OK;
+        bool thumbnailFailed = false;
+        bool visible = false;
     };
 
     bool LoadRoot();
@@ -44,6 +47,8 @@ private:
     void EnsureItemCount(size_t count);
     void ApplyLayout(const std::vector<AppSwitcherWindowItem>& windows, UINT widthPx, UINT heightPx, double scale);
     void AttachPointerHandlers();
+    void ClearItemThumbnail(ItemView& item);
+    void ResetItem(ItemView& item);
 
     static std::wstring LoadTextFileUtf8(const std::wstring& path);
     static std::wstring ModuleRelativePath(const std::wstring& relativePath);
