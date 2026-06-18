@@ -3,6 +3,7 @@
 #include "AppSwitcherLayoutEngine.h"
 #include "ThinXamlAppSwitcherHost.h"
 #include "common/CoordinateSpace.h"
+#include "thumbnail/PrivateThumbnailManager.h"
 
 #ifdef GetCurrentTime
 #undef GetCurrentTime
@@ -11,6 +12,7 @@
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -32,6 +34,9 @@ private:
         winrt::Windows::UI::Xaml::Controls::TextBlock title{nullptr};
         winrt::Windows::UI::Xaml::Controls::Button closeButton{nullptr};
         winrt::Windows::UI::Xaml::FrameworkElement thumbnailHost{nullptr};
+        HWND hwnd = nullptr;
+        PointDip layoutPosition{};
+        std::unique_ptr<touchrev::thumbnail::PrivateThumbnailSlot> thumbnailSlot;
     };
 
     bool LoadRoot();
@@ -50,7 +55,6 @@ private:
     winrt::Windows::UI::Xaml::Controls::Grid root_{nullptr};
     winrt::Windows::UI::Xaml::FrameworkElement appSwitcherContainer_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Canvas layoutCanvas_{nullptr};
-    winrt::Windows::UI::Xaml::Media::TranslateTransform containerTransform_{nullptr};
     winrt::Windows::UI::Xaml::FrameworkElement focusBorder_{nullptr};
     winrt::Windows::UI::Xaml::FrameworkElement emptyGrid_{nullptr};
     std::vector<ItemView> items_;
@@ -58,6 +62,9 @@ private:
     SizeDip contentBoundsDip_{};
     SizeDip clientSizeDip_{};
     bool xamlPointerDragging_ = false;
+    size_t activeDragItemIndex_ = static_cast<size_t>(-1);
     double xamlDragOffsetX_ = 0.0;
     double xamlDragOffsetY_ = 0.0;
+    double currentDpiScale_ = 1.0;
+    touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
 };

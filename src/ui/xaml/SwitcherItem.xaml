@@ -76,7 +76,7 @@
         <Border
             x:Name="ContentFrame"
             Grid.Row="1"
-            Margin="1,0,1,2"
+            Margin="0,0,0,0"
             Background="#FF101010"
             CornerRadius="0,0,10,10">
             <Grid>

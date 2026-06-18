@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <string>
 #include <vector>
 
 struct AppSwitcherWindowItem
@@ -9,6 +10,7 @@ struct AppSwitcherWindowItem
     HWND hwnd = nullptr;
     double widthPx = 1280.0;
     double heightPx = 720.0;
+    std::wstring title;
 };
 
 struct AppSwitcherItemLayout

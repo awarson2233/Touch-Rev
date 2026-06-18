@@ -18,6 +18,9 @@ add_executable(TouchRevGUI WIN32
     src/ui/BackdropController.h
     src/ui/ThinXamlAppSwitcherHost.cpp
     src/ui/ThinXamlAppSwitcherHost.h
+    src/thumbnail/PrivateThumbnailInterfaces.h
+    src/thumbnail/PrivateThumbnailManager.cpp
+    src/thumbnail/PrivateThumbnailManager.h
     src/common/CoordinateSpace.h
     src/input/InputController.cpp
     src/input/InputController.h
