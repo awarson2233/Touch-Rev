@@ -24,12 +24,18 @@ public:
     {
         None,
         ShowSwitcher,
+        LongPressBegin,
+        LongPressMove,
+        LongPressEnd,
     };
 
     struct RawInputResult
     {
         bool handled = false;
         InputAction action = InputAction::None;
+        double deltaX = 0.0;
+        double deltaY = 0.0;
+        bool allContactsReleased = false;
     };
 
     void Initialize(HWND hwnd);
@@ -70,6 +76,7 @@ private:
     void RecordSample(PointDip point, std::int64_t qpc);
     PointDip PredictPointerPosition(std::int64_t nowQpc) const;
 
+    HWND hwnd_ = nullptr;
     bool pointerDragging_ = false;
     bool mouseDragging_ = false;
     bool touchDragging_ = false;

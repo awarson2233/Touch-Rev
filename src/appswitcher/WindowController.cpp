@@ -116,10 +116,17 @@ std::vector<WindowItem> EnumerateActiveWindows(HWND excludeHwnd)
 
 void ActivateWindow(HWND targetHwnd)
 {
-    if (IsWindow(targetHwnd))
+    if (!IsWindow(targetHwnd))
     {
-        SetForegroundWindow(targetHwnd);
+        return;
     }
+
+    if (IsIconic(targetHwnd))
+    {
+        ShowWindow(targetHwnd, SW_RESTORE);
+    }
+
+    SetForegroundWindow(targetHwnd);
 }
 
 bool RequestCloseWindow(HWND targetHwnd)
@@ -138,7 +145,7 @@ bool RequestCloseWindow(HWND targetHwnd)
     return false;
 }
 
-void RestoreAndCenterWindow(HWND targetHwnd, POINT centerPoint, const RECT& fallbackWorkAreaPx)
+void ActivateWindow(HWND targetHwnd, POINT centerPoint, const RECT& fallbackWorkAreaPx)
 {
     if (!IsWindow(targetHwnd))
     {

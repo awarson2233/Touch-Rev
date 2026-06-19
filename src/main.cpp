@@ -1,4 +1,4 @@
-#include "ui/AppWindow.h"
+#include "ui/MainWindow.h"
 #include "common/Win32Error.h"
 
 #include <windows.h>
@@ -8,29 +8,29 @@
 
 namespace
 {
-AppWindow::ActivationCommand ParseActivationCommand()
+MainWindow::ActivationCommand ParseActivationCommand()
 {
     const std::wstring commandLine = GetCommandLineW();
     if (commandLine.find(L"--exit") != std::wstring::npos)
     {
-        return AppWindow::ActivationCommand::Exit;
+        return MainWindow::ActivationCommand::Exit;
     }
     if (commandLine.find(L"--hide") != std::wstring::npos)
     {
-        return AppWindow::ActivationCommand::Hide;
+        return MainWindow::ActivationCommand::Hide;
     }
     if (commandLine.find(L"--toggle") != std::wstring::npos)
     {
-        return AppWindow::ActivationCommand::Toggle;
+        return MainWindow::ActivationCommand::Toggle;
     }
-    return AppWindow::ActivationCommand::Show;
+    return MainWindow::ActivationCommand::Show;
 }
 
 HWND FindExistingAppWindow()
 {
     for (int attempt = 0; attempt < 50; ++attempt)
     {
-        HWND hwnd = FindWindowW(AppWindow::WindowClassName, nullptr);
+        HWND hwnd = FindWindowW(MainWindow::WindowClassName, nullptr);
         if (hwnd)
         {
             return hwnd;
@@ -40,7 +40,7 @@ HWND FindExistingAppWindow()
     return nullptr;
 }
 
-bool RedirectToExistingInstance(AppWindow::ActivationCommand command)
+bool RedirectToExistingInstance(MainWindow::ActivationCommand command)
 {
     HWND hwnd = FindExistingAppWindow();
     if (!hwnd)
@@ -55,7 +55,7 @@ bool RedirectToExistingInstance(AppWindow::ActivationCommand command)
         AllowSetForegroundWindow(processId);
     }
 
-    const UINT wakeMessage = RegisterWindowMessageW(AppWindow::WakeMessageName);
+    const UINT wakeMessage = RegisterWindowMessageW(MainWindow::WakeMessageName);
     if (wakeMessage == 0)
     {
         DebugLogHResult(L"RegisterWindowMessageW", HResultFromLastError());
@@ -87,8 +87,8 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         DebugLog(L"SetProcessDpiAwarenessContext failed; continuing with process default DPI awareness.");
     }
 
-    const AppWindow::ActivationCommand command = ParseActivationCommand();
-    HANDLE singleInstanceMutex = CreateMutexW(nullptr, TRUE, AppWindow::SingleInstanceMutexName);
+    const MainWindow::ActivationCommand command = ParseActivationCommand();
+    HANDLE singleInstanceMutex = CreateMutexW(nullptr, TRUE, MainWindow::SingleInstanceMutexName);
     if (!singleInstanceMutex)
     {
         DebugLogHResult(L"CreateMutexW", HResultFromLastError());
@@ -104,8 +104,8 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         return redirected ? 0 : -1;
     }
 
-    const int initialShowCommand = command == AppWindow::ActivationCommand::Hide ? SW_HIDE : showCommand;
-    AppWindow app;
+    const int initialShowCommand = command == MainWindow::ActivationCommand::Hide ? SW_HIDE : showCommand;
+    MainWindow app;
     if (!app.Initialize(instance, initialShowCommand))
     {
         MessageBoxW(nullptr, L"Failed to create the main window.", L"TouchRevGUI", MB_ICONERROR | MB_OK);
@@ -122,14 +122,14 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
 
     switch (command)
     {
-    case AppWindow::ActivationCommand::Hide:
+    case MainWindow::ActivationCommand::Hide:
         app.Hide();
         break;
-    case AppWindow::ActivationCommand::Toggle:
-    case AppWindow::ActivationCommand::Show:
+    case MainWindow::ActivationCommand::Toggle:
+    case MainWindow::ActivationCommand::Show:
         app.ShowSwitcher();
         break;
-    case AppWindow::ActivationCommand::Exit:
+    case MainWindow::ActivationCommand::Exit:
         app.ExitApplication();
         break;
     }

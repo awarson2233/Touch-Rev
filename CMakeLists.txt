@@ -10,8 +10,8 @@ add_executable(TouchRevGUI WIN32
     src/main.cpp
     TouchRevGUI.rc
     app.manifest
-    src/ui/AppWindow.cpp
-    src/ui/AppWindow.h
+    src/ui/MainWindow.cpp
+    src/ui/MainWindow.h
     src/appswitcher/CardView.cpp
     src/appswitcher/CardView.h
     src/appswitcher/LayoutEngine.cpp

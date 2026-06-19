@@ -1,4 +1,4 @@
-#include "AppWindow.h"
+#include "MainWindow.h"
 
 #include "appswitcher/WindowController.h"
 #include "common/Win32Error.h"
@@ -36,7 +36,7 @@ float GetMonitorDpi(HMONITOR monitor)
 }
 }
 
-bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
+bool MainWindow::Initialize(HINSTANCE instance, int showCommand)
 {
     instance_ = instance;
     wakeMessage_ = RegisterWindowMessageW(WakeMessageName);
@@ -49,7 +49,7 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
     WNDCLASSEXW windowClass = {};
     windowClass.cbSize = sizeof(windowClass);
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
-    windowClass.lpfnWndProc = AppWindow::WindowProc;
+    windowClass.lpfnWndProc = MainWindow::WindowProc;
     windowClass.cbClsExtra = 0;
     windowClass.cbWndExtra = 0;
     windowClass.hInstance = instance_;
@@ -57,7 +57,7 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     windowClass.hbrBackground = nullptr;
     windowClass.lpszMenuName = nullptr;
-    windowClass.lpszClassName = AppWindow::WindowClassName;
+    windowClass.lpszClassName = MainWindow::WindowClassName;
     windowClass.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
 
     if (RegisterClassExW(&windowClass) == 0)
@@ -77,7 +77,7 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
 
     hwnd_ = CreateWindowExW(
         exStyle,
-        AppWindow::WindowClassName,
+        MainWindow::WindowClassName,
         kWindowTitle,
         style,
         windowRect.left,
@@ -101,7 +101,7 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
     return true;
 }
 
-int AppWindow::Run()
+int MainWindow::Run()
 {
     MSG message{};
     while (true)
@@ -117,17 +117,17 @@ int AppWindow::Run()
     }
 }
 
-LRESULT CALLBACK AppWindow::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT CALLBACK MainWindow::WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (message == WM_NCCREATE)
     {
         const auto createStruct = reinterpret_cast<CREATESTRUCTW*>(lParam);
-        auto* app = static_cast<AppWindow*>(createStruct->lpCreateParams);
+        auto* app = static_cast<MainWindow*>(createStruct->lpCreateParams);
         app->hwnd_ = hwnd;
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(app));
     }
 
-    auto* app = reinterpret_cast<AppWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    auto* app = reinterpret_cast<MainWindow*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (app)
     {
         return app->HandleMessage(message, wParam, lParam);
@@ -136,7 +136,7 @@ LRESULT CALLBACK AppWindow::WindowProc(HWND hwnd, UINT message, WPARAM wParam, L
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
-LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
+LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
     if (message == wakeMessage_)
     {
@@ -228,6 +228,37 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         if (inputResult.action == InputController::InputAction::ShowSwitcher)
         {
             ShowSwitcher();
+        }
+        else if (inputResult.action == InputController::InputAction::LongPressBegin)
+        {
+            ShowSwitcher();
+            isLongPressNavigating_ = true;
+            pendingLongPressActivation_ = false;
+            appSwitcherMainView_.ClearGestureAccumulator();
+        }
+        else if (inputResult.action == InputController::InputAction::LongPressMove)
+        {
+            if (isLongPressNavigating_ && isVisible_)
+            {
+                appSwitcherMainView_.AccumulateAndMoveSelection(inputResult.deltaX, inputResult.deltaY);
+            }
+        }
+        else if (inputResult.action == InputController::InputAction::LongPressEnd)
+        {
+            if (isLongPressNavigating_)
+            {
+                isLongPressNavigating_ = false;
+                pendingLongPressActivation_ = isVisible_;
+            }
+        }
+
+        if (pendingLongPressActivation_ && inputResult.allContactsReleased)
+        {
+            pendingLongPressActivation_ = false;
+            if (isVisible_)
+            {
+                appSwitcherMainView_.ActivateSelectedItem();
+            }
         }
         return 0;
     }
@@ -340,7 +371,7 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     return DefWindowProcW(hwnd_, message, wParam, lParam);
 }
 
-HRESULT AppWindow::OnCreate()
+HRESULT MainWindow::OnCreate()
 {
     dpi_ = static_cast<float>(GetDpiForWindow(hwnd_));
     coordinates_.Update(dpi_, GetClientWidth(hwnd_), GetClientHeight(hwnd_));
@@ -361,7 +392,7 @@ HRESULT AppWindow::OnCreate()
         Hide();
     });
     appSwitcherMainView_.SetItemDragReleasedCallback([this](HWND targetHwnd, POINT releasePoint) {
-        touchrev::appswitcher::RestoreAndCenterWindow(targetHwnd, releasePoint, targetWorkAreaPx_);
+        touchrev::appswitcher::ActivateWindow(targetHwnd, releasePoint, targetWorkAreaPx_);
         Hide();
     });
     appSwitcherMainView_.SetItemCloseRequestedCallback([](HWND targetHwnd) {
@@ -379,14 +410,14 @@ HRESULT AppWindow::OnCreate()
     return S_OK;
 }
 
-void AppWindow::OnDestroy()
+void MainWindow::OnDestroy()
 {
     appSwitcherMainView_.Shutdown();
     xamlHost_.Shutdown();
     PostQuitMessage(0);
 }
 
-void AppWindow::OnSize(UINT width, UINT height)
+void MainWindow::OnSize(UINT width, UINT height)
 {
     if (isSyncingLayout_)
     {
@@ -396,7 +427,7 @@ void AppWindow::OnSize(UINT width, UINT height)
     RebaseActiveDrag();
 }
 
-void AppWindow::OnDpiChanged(WPARAM wParam, LPARAM lParam)
+void MainWindow::OnDpiChanged(WPARAM wParam, LPARAM lParam)
 {
     const float newDpi = static_cast<float>(LOWORD(wParam));
     
@@ -454,14 +485,14 @@ void AppWindow::OnDpiChanged(WPARAM wParam, LPARAM lParam)
     RebaseActiveDrag();
 }
 
-void AppWindow::OnPaint()
+void MainWindow::OnPaint()
 {
     PAINTSTRUCT paint{};
     BeginPaint(hwnd_, &paint);
     EndPaint(hwnd_, &paint);
 }
 
-void AppWindow::RefreshTheme()
+void MainWindow::RefreshTheme()
 {
     const bool changed = themeManager_.Refresh(hwnd_);
     if (changed)
@@ -471,7 +502,7 @@ void AppWindow::RefreshTheme()
     UpdateTransparentRegion();
 }
 
-void AppWindow::SyncClientLayout(UINT width, UINT height, bool renderSwitcher)
+void MainWindow::SyncClientLayout(UINT width, UINT height, bool renderSwitcher)
 {
     coordinates_.Update(dpi_, width, height);
     xamlHost_.Resize(width, height);
@@ -486,12 +517,12 @@ void AppWindow::SyncClientLayout(UINT width, UINT height, bool renderSwitcher)
     UpdateTransparentRegion();
 }
 
-void AppWindow::RebaseActiveDrag()
+void MainWindow::RebaseActiveDrag()
 {
     inputController_.RebaseActiveDrag(hwnd_, appSwitcherMainView_.DragPosition(), coordinates_);
 }
 
-void AppWindow::UpdateTransparentRegion()
+void MainWindow::UpdateTransparentRegion()
 {
     if (!hwnd_)
     {
@@ -501,7 +532,7 @@ void AppWindow::UpdateTransparentRegion()
     SetWindowRgn(hwnd_, nullptr, TRUE);
 }
 
-void AppWindow::ShowSwitcher()
+void MainWindow::ShowSwitcher()
 {
     if (!hwnd_)
     {
@@ -545,7 +576,7 @@ void AppWindow::ShowSwitcher()
     isSyncingLayout_ = false;
 }
 
-void AppWindow::Hide()
+void MainWindow::Hide()
 {
     if (!hwnd_ || !isVisible_)
     {
@@ -556,9 +587,11 @@ void AppWindow::Hide()
     appSwitcherMainView_.CancelInteraction();
     ShowWindow(hwnd_, SW_HIDE);
     isVisible_ = false;
+    isLongPressNavigating_ = false;
+    pendingLongPressActivation_ = false;
 }
 
-void AppWindow::ToggleSwitcher()
+void MainWindow::ToggleSwitcher()
 {
     if (isVisible_)
     {
@@ -569,7 +602,7 @@ void AppWindow::ToggleSwitcher()
     ShowSwitcher();
 }
 
-void AppWindow::ExitApplication()
+void MainWindow::ExitApplication()
 {
     if (!hwnd_)
     {
@@ -580,7 +613,7 @@ void AppWindow::ExitApplication()
     DestroyWindow(hwnd_);
 }
 
-void AppWindow::HandleInputResult(const InputController::Result& result)
+void MainWindow::HandleInputResult(const InputController::Result& result)
 {
     if (result.positionChanged || result.dragEnded)
     {
@@ -588,7 +621,7 @@ void AppWindow::HandleInputResult(const InputController::Result& result)
     }
 }
 
-bool AppWindow::HandleKeyDown(WPARAM key)
+bool MainWindow::HandleKeyDown(WPARAM key)
 {
     switch (key)
     {
@@ -623,7 +656,7 @@ bool AppWindow::HandleKeyDown(WPARAM key)
     return false;
 }
 
-HMONITOR AppWindow::ResolveTargetMonitor() const
+HMONITOR MainWindow::ResolveTargetMonitor() const
 {
     POINT cursor{};
     if (GetCursorPos(&cursor))
@@ -648,7 +681,7 @@ HMONITOR AppWindow::ResolveTargetMonitor() const
     return MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
 }
 
-MONITORINFO AppWindow::LoadMonitorInfo(HMONITOR monitor) const
+MONITORINFO MainWindow::LoadMonitorInfo(HMONITOR monitor) const
 {
     MONITORINFO monitorInfo{};
     monitorInfo.cbSize = sizeof(monitorInfo);
@@ -660,7 +693,7 @@ MONITORINFO AppWindow::LoadMonitorInfo(HMONITOR monitor) const
     return monitorInfo;
 }
 
-bool AppWindow::CanStartDragFromPointer(WPARAM wParam) const
+bool MainWindow::CanStartDragFromPointer(WPARAM wParam) const
 {
     const UINT32 pointerId = GET_POINTERID_WPARAM(wParam);
     POINTER_INFO pointerInfo = {};
@@ -672,30 +705,30 @@ bool AppWindow::CanStartDragFromPointer(WPARAM wParam) const
     return appSwitcherMainView_.HitTest(coordinates_.ScreenPixelsToDips(hwnd_, pointerInfo.ptPixelLocation));
 }
 
-bool AppWindow::CanStartDragFromMouse(LPARAM lParam) const
+bool MainWindow::CanStartDragFromMouse(LPARAM lParam) const
 {
     POINT clientPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
     return appSwitcherMainView_.HitTest(coordinates_.ClientPixelsToDips(clientPoint));
 }
 
-UINT AppWindow::ClientWidthFromLParam(LPARAM lParam)
+UINT MainWindow::ClientWidthFromLParam(LPARAM lParam)
 {
     return std::max<UINT>(1u, static_cast<UINT>(LOWORD(lParam)));
 }
 
-UINT AppWindow::ClientHeightFromLParam(LPARAM lParam)
+UINT MainWindow::ClientHeightFromLParam(LPARAM lParam)
 {
     return std::max<UINT>(1u, static_cast<UINT>(HIWORD(lParam)));
 }
 
-UINT AppWindow::GetClientWidth(HWND hwnd)
+UINT MainWindow::GetClientWidth(HWND hwnd)
 {
     RECT rect{};
     GetClientRect(hwnd, &rect);
     return static_cast<UINT>(std::max<LONG>(1, rect.right - rect.left));
 }
 
-UINT AppWindow::GetClientHeight(HWND hwnd)
+UINT MainWindow::GetClientHeight(HWND hwnd)
 {
     RECT rect{};
     GetClientRect(hwnd, &rect);

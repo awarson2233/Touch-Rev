@@ -855,6 +855,72 @@ void MainView::ApplyLayout(
         boundsChangedCallback_();
     }
 }
+
+bool MainView::AccumulateAndMoveSelection(double deltaX, double deltaY)
+{
+    if (!CanNavigateSelection())
+    {
+        return false;
+    }
+
+    EnsureSelectedIndex();
+    if (selectedItemIndex_ == static_cast<size_t>(-1) || selectedItemIndex_ >= cards_.size())
+    {
+        return false;
+    }
+
+    gestureAccX_ += deltaX;
+    gestureAccY_ += deltaY;
+
+    double currentSnapThresholdX = 50.0;
+    double currentSnapThresholdY = 50.0;
+
+    auto& card = cards_[selectedItemIndex_];
+    if (card && card->layoutSize.width > 0 && card->layoutSize.height > 0)
+    {
+        double gap = 32.0;
+        double ratio = 0.4;
+        currentSnapThresholdX = (card->layoutSize.width + gap) * ratio;
+        currentSnapThresholdY = (card->layoutSize.height + gap) * ratio;
+    }
+
+    bool selectedChanged = false;
+
+    if (std::abs(gestureAccX_) > currentSnapThresholdX)
+    {
+        int steps = static_cast<int>(gestureAccX_ / currentSnapThresholdX);
+        if (steps != 0)
+        {
+            if (MoveSelection(steps, 0))
+            {
+                selectedChanged = true;
+            }
+            gestureAccX_ = std::fmod(gestureAccX_, currentSnapThresholdX);
+        }
+    }
+
+    if (std::abs(gestureAccY_) > currentSnapThresholdY)
+    {
+        int steps = static_cast<int>(gestureAccY_ / currentSnapThresholdY);
+        if (steps != 0)
+        {
+            if (MoveSelection(0, steps))
+            {
+                selectedChanged = true;
+            }
+            gestureAccY_ = std::fmod(gestureAccY_, currentSnapThresholdY);
+        }
+    }
+
+    return selectedChanged;
 }
+
+void MainView::ClearGestureAccumulator()
+{
+    gestureAccX_ = 0.0;
+    gestureAccY_ = 0.0;
+}
+}
+
 
 

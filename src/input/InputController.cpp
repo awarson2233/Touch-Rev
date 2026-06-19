@@ -7,6 +7,8 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
+#include <fstream>
+#include <sstream>
 
 namespace
 {
@@ -34,10 +36,98 @@ std::int64_t PointerCounterOrNow(const POINTER_INFO& pointerInfo)
                ? static_cast<std::int64_t>(pointerInfo.PerformanceCount)
                : QueryCounterValue();
 }
+
+enum class ScreenRotation
+{
+    Rotation0 = 0,
+    Rotation90 = 1,
+    Rotation180 = 2,
+    Rotation270 = 3
+};
+
+ScreenRotation RotationFromMonitor(HMONITOR monitor)
+{
+    if (!monitor)
+    {
+        return ScreenRotation::Rotation0;
+    }
+
+    MONITORINFOEXW mi{};
+    mi.cbSize = sizeof(mi);
+    if (GetMonitorInfoW(monitor, &mi))
+    {
+        DEVMODEW dm{};
+        dm.dmSize = sizeof(dm);
+        if (EnumDisplaySettingsW(mi.szDevice, ENUM_CURRENT_SETTINGS, &dm))
+        {
+            return static_cast<ScreenRotation>(dm.dmDisplayOrientation);
+        }
+    }
+
+    DEVMODEW dm{};
+    dm.dmSize = sizeof(dm);
+    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &dm))
+    {
+        return static_cast<ScreenRotation>(dm.dmDisplayOrientation);
+    }
+
+    return ScreenRotation::Rotation0;
+}
+
+ScreenRotation GetDisplayRotationFromTouchFrame(const RawTouchInput::Frame& frame, HWND fallbackHwnd)
+{
+    LONG sumX = 0;
+    LONG sumY = 0;
+    int activeCount = 0;
+    for (const RawTouchInput::TouchPoint& point : frame.points)
+    {
+        if (!point.active)
+        {
+            continue;
+        }
+
+        sumX += point.x;
+        sumY += point.y;
+        ++activeCount;
+    }
+
+    if (activeCount > 0)
+    {
+        const POINT touchCenter{
+            sumX / activeCount,
+            sumY / activeCount,
+        };
+        return RotationFromMonitor(MonitorFromPoint(touchCenter, MONITOR_DEFAULTTONEAREST));
+    }
+
+    if (fallbackHwnd)
+    {
+        return RotationFromMonitor(MonitorFromWindow(fallbackHwnd, MONITOR_DEFAULTTONEAREST));
+    }
+
+    return RotationFromMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
+}
+
+void LogToFile(const std::wstring& text)
+{
+    std::wofstream logFile("touchrev_debug.log", std::ios::app);
+    if (logFile.is_open())
+    {
+        logFile << text << std::endl;
+    }
+}
 }
 
 void InputController::Initialize(HWND hwnd)
 {
+    hwnd_ = hwnd;
+    {
+        std::wofstream logFile("touchrev_debug.log", std::ios::trunc);
+        if (logFile.is_open())
+        {
+            logFile << L"=== TouchRev Debug Session Started ===" << std::endl;
+        }
+    }
     if (!EnableMouseInPointer(TRUE))
     {
         DebugLog(L"EnableMouseInPointer failed; mouse fallback messages remain enabled.");
@@ -230,7 +320,8 @@ InputController::Result InputController::OnTouch(
 InputController::RawInputResult InputController::OnRawInput(LPARAM lParam)
 {
     const RawTouchInput::Frame frame = rawTouchInput_.ProcessRawInput(lParam);
-    if (!frame.HasTouch() && !(frame.frameSync && frame.contactCount == 0))
+    const bool allContactsReleased = frame.frameSync && frame.contactCount == 0;
+    if (!frame.HasTouch() && !allContactsReleased)
     {
         return {.handled = true};
     }
@@ -238,10 +329,65 @@ InputController::RawInputResult InputController::OnRawInput(LPARAM lParam)
     const ThreeFingerGestureRecognizer::Result gestureResult = gestureRecognizer_.ProcessFrame(frame);
     if (gestureResult.type == ThreeFingerGestureRecognizer::EventType::DoubleTap)
     {
-        return {.handled = true, .action = InputAction::ShowSwitcher};
+        return {.handled = true, .action = InputAction::ShowSwitcher, .allContactsReleased = allContactsReleased};
+    }
+    else if (gestureResult.type == ThreeFingerGestureRecognizer::EventType::LongPressStarted)
+    {
+        const ScreenRotation rotation = GetDisplayRotationFromTouchFrame(frame, hwnd_);
+        std::wstringstream ss;
+        ss << L"[LongPressBegin] Touch Monitor Rotation: " << static_cast<int>(rotation);
+        LogToFile(ss.str());
+        return {.handled = true, .action = InputAction::LongPressBegin, .allContactsReleased = allContactsReleased};
+    }
+    else if (gestureResult.type == ThreeFingerGestureRecognizer::EventType::LongPressMoved)
+    {
+        double dx = gestureResult.delta.x;
+        double dy = gestureResult.delta.y;
+
+        const ScreenRotation rotation = GetDisplayRotationFromTouchFrame(frame, hwnd_);
+        double adjX = dx;
+        double adjY = dy;
+        switch (rotation)
+        {
+        case ScreenRotation::Rotation0:
+            adjX = dx;
+            adjY = dy;
+            break;
+        case ScreenRotation::Rotation90:
+            adjX = -dy;
+            adjY = dx;
+            break;
+        case ScreenRotation::Rotation180:
+            adjX = -dx;
+            adjY = -dy;
+            break;
+        case ScreenRotation::Rotation270:
+            adjX = dy;
+            adjY = -dx;
+            break;
+        }
+
+        std::wstringstream ss;
+        ss << L"[LongPressMove] Original: (" << dx << L", " << dy
+           << L"), Adjusted: (" << adjX << L", " << adjY
+           << L") at Rotation: " << static_cast<int>(rotation);
+        LogToFile(ss.str());
+
+        return {
+            .handled = true,
+            .action = InputAction::LongPressMove,
+            .deltaX = adjX,
+            .deltaY = adjY,
+            .allContactsReleased = allContactsReleased
+        };
+    }
+    else if (gestureResult.type == ThreeFingerGestureRecognizer::EventType::LongPressEnded)
+    {
+        LogToFile(L"[LongPressEnd] Ended");
+        return {.handled = true, .action = InputAction::LongPressEnd, .allContactsReleased = allContactsReleased};
     }
 
-    return {.handled = true};
+    return {.handled = true, .allContactsReleased = allContactsReleased};
 }
 
 PointDip InputController::EvaluateVisualPosition() const

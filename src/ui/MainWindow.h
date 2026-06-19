@@ -8,7 +8,7 @@
 
 #include <windows.h>
 
-class AppWindow
+class MainWindow
 {
 public:
     enum class ActivationCommand : WPARAM
@@ -73,4 +73,6 @@ private:
     ThinXamlAppSwitcherHost xamlHost_;
     touchrev::appswitcher::MainView appSwitcherMainView_;
     bool isSyncingLayout_ = false;
+    bool isLongPressNavigating_ = false;
+    bool pendingLongPressActivation_ = false;
 };
