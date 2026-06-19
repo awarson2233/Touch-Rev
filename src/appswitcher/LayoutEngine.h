@@ -1,11 +1,14 @@
 #pragma once
 
+#include "common/CoordinateSpace.h"
 #include <windows.h>
 
 #include <string>
 #include <vector>
 
-struct AppSwitcherWindowItem
+namespace touchrev::appswitcher
+{
+struct WindowItem
 {
     HWND hwnd = nullptr;
     double widthPx = 1280.0;
@@ -13,24 +16,43 @@ struct AppSwitcherWindowItem
     std::wstring title;
 };
 
-struct AppSwitcherItemLayout
+struct ItemLayout
 {
     RECT rectPx{};
 };
 
-struct AppSwitcherLayoutResult
+struct LayoutResult
 {
     SIZE totalSizePx{};
-    std::vector<AppSwitcherItemLayout> items;
+    std::vector<ItemLayout> items;
 };
 
-class AppSwitcherLayoutEngine
+struct ItemGeometry
+{
+    PointDip position;
+    SizeDip size;
+    bool visible = false;
+};
+
+class LayoutEngine
 {
 public:
-    static AppSwitcherLayoutResult Calculate(
-        const std::vector<AppSwitcherWindowItem>& windows,
+    static LayoutResult Calculate(
+        const std::vector<WindowItem>& windows,
         const RECT& workAreaPx,
         double scale);
+
+    static size_t CalculateNextSelection(
+        const std::vector<ItemGeometry>& items,
+        size_t currentIndex,
+        int stepX,
+        int stepY);
+
+    static size_t GetNextVisibleIndex(
+        const std::vector<ItemGeometry>& items,
+        size_t currentIndex,
+        bool forward);
+
 
     static constexpr double ItemGapDip = 32.0;
     static constexpr double PaddingDip = 48.0;
@@ -40,3 +62,6 @@ public:
     static constexpr double MinAspect = 0.4;
     static constexpr double MaxAspect = 2.5;
 };
+}
+
+

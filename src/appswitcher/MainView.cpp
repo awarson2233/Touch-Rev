@@ -1,7 +1,10 @@
-#include "AppSwitcherXamlView.h"
+#include "MainView.h"
 
-#include "AppSwitcherWindowing.h"
+#include "WindowController.h"
 #include "common/Win32Error.h"
+#include "common/FileUtils.h"
+#include "common/PathUtils.h"
+#include "common/GeometryUtils.h"
 
 #ifdef GetCurrentTime
 #undef GetCurrentTime
@@ -21,32 +24,15 @@
 
 #include <algorithm>
 #include <cmath>
-#include <fstream>
-#include <limits>
 #include <sstream>
 #include <utility>
 
+namespace touchrev::appswitcher
+{
 namespace
 {
 constexpr wchar_t kRootXamlPath[] = L"xaml/AppSwitcherRoot.xaml";
 constexpr wchar_t kItemXamlPath[] = L"xaml/SwitcherItem.xaml";
-
-int RectWidth(const RECT& rect)
-{
-    return rect.right - rect.left;
-}
-
-int RectHeight(const RECT& rect)
-{
-    return rect.bottom - rect.top;
-}
-
-double Distance(PointDip a, PointDip b)
-{
-    const double dx = static_cast<double>(a.x - b.x);
-    const double dy = static_cast<double>(a.y - b.y);
-    return std::sqrt(dx * dx + dy * dy);
-}
 
 winrt::Windows::UI::Xaml::Media::SolidColorBrush Brush(winrt::Windows::UI::Color color)
 {
@@ -70,39 +56,9 @@ winrt::Windows::UI::Xaml::Media::Brush AcrylicBrush(const AppSwitcherPalette& pa
         return Brush(palette.containerAcrylicFallback);
     }
 }
-
-std::wstring ToWideFromUtf8(const std::string& text)
-{
-    if (text.empty())
-    {
-        return {};
-    }
-
-    const int length = MultiByteToWideChar(
-        CP_UTF8,
-        MB_ERR_INVALID_CHARS,
-        text.data(),
-        static_cast<int>(text.size()),
-        nullptr,
-        0);
-    if (length <= 0)
-    {
-        return {};
-    }
-
-    std::wstring wide(static_cast<size_t>(length), L'\0');
-    MultiByteToWideChar(
-        CP_UTF8,
-        MB_ERR_INVALID_CHARS,
-        text.data(),
-        static_cast<int>(text.size()),
-        wide.data(),
-        length);
-    return wide;
-}
 }
 
-bool AppSwitcherXamlView::Initialize(HWND hwnd, ThinXamlAppSwitcherHost& host)
+bool MainView::Initialize(HWND hwnd, ThinXamlAppSwitcherHost& host)
 {
     hwnd_ = hwnd;
     host_ = &host;
@@ -126,13 +82,13 @@ bool AppSwitcherXamlView::Initialize(HWND hwnd, ThinXamlAppSwitcherHost& host)
     return true;
 }
 
-void AppSwitcherXamlView::Shutdown()
+void MainView::Shutdown()
 {
-    for (auto& item : items_)
+    for (auto& item : cards_)
     {
         item.Reset(palette_);
     }
-    items_.clear();
+    cards_.clear();
     appSwitcherContainer_ = nullptr;
     layoutCanvas_ = nullptr;
     focusBorder_ = nullptr;
@@ -145,7 +101,7 @@ void AppSwitcherXamlView::Shutdown()
     initialized_ = false;
 }
 
-void AppSwitcherXamlView::Resize(UINT widthPx, UINT heightPx, double scale)
+void MainView::Resize(UINT widthPx, UINT heightPx, double scale)
 {
     if (!initialized_)
     {
@@ -155,19 +111,19 @@ void AppSwitcherXamlView::Resize(UINT widthPx, UINT heightPx, double scale)
     RenderSample(widthPx, heightPx, scale);
 }
 
-void AppSwitcherXamlView::CancelInteraction()
+void MainView::CancelInteraction()
 {
     ResetInteractionState();
 }
 
-bool AppSwitcherXamlView::HitTest(PointDip point) const
+bool MainView::HitTest(PointDip point) const
 {
     if (!initialized_)
     {
         return false;
     }
 
-    for (const auto& item : items_)
+    for (const auto& item : cards_)
     {
         if (!item.visible)
         {
@@ -185,7 +141,7 @@ bool AppSwitcherXamlView::HitTest(PointDip point) const
     return false;
 }
 
-RECT AppSwitcherXamlView::VisibleBoundsPx() const
+RECT MainView::VisibleBoundsPx() const
 {
     const double safeScale = std::max(0.01, currentDpiScale_);
     return {
@@ -195,7 +151,7 @@ RECT AppSwitcherXamlView::VisibleBoundsPx() const
         static_cast<LONG>(std::ceil(static_cast<double>(visibleOriginDip_.y + visibleBoundsDip_.height) * safeScale))};
 }
 
-RECT AppSwitcherXamlView::ContainerBoundsPx() const
+RECT MainView::ContainerBoundsPx() const
 {
     const double safeScale = std::max(0.01, currentDpiScale_);
     return {
@@ -205,44 +161,44 @@ RECT AppSwitcherXamlView::ContainerBoundsPx() const
         static_cast<LONG>(std::ceil(static_cast<double>(contentOriginDip_.y + contentBoundsDip_.height) * safeScale))};
 }
 
-void AppSwitcherXamlView::SetDragPosition(PointDip position)
+void MainView::SetDragPosition(PointDip position)
 {
     dragPosition_ = position;
 }
 
-void AppSwitcherXamlView::SetBoundsChangedCallback(std::function<void()> callback)
+void MainView::SetBoundsChangedCallback(std::function<void()> callback)
 {
     boundsChangedCallback_ = std::move(callback);
 }
 
-void AppSwitcherXamlView::SetMissedInputCallback(std::function<void()> callback)
+void MainView::SetMissedInputCallback(std::function<void()> callback)
 {
     missedInputCallback_ = std::move(callback);
 }
 
-void AppSwitcherXamlView::SetItemActivatedCallback(std::function<void(HWND)> callback)
+void MainView::SetItemActivatedCallback(std::function<void(HWND)> callback)
 {
     itemActivatedCallback_ = std::move(callback);
 }
 
-void AppSwitcherXamlView::SetItemDragReleasedCallback(std::function<void(HWND, POINT)> callback)
+void MainView::SetItemDragReleasedCallback(std::function<void(HWND, POINT)> callback)
 {
     itemDragReleasedCallback_ = std::move(callback);
 }
 
-void AppSwitcherXamlView::SetItemCloseRequestedCallback(std::function<bool(HWND)> callback)
+void MainView::SetItemCloseRequestedCallback(std::function<bool(HWND)> callback)
 {
     itemCloseRequestedCallback_ = std::move(callback);
 }
 
-bool AppSwitcherXamlView::CanNavigateSelection() const
+bool MainView::CanNavigateSelection() const
 {
     return initialized_ && !xamlPointerPressed_ && !xamlPointerDragging_;
 }
 
-bool AppSwitcherXamlView::SetSelectedIndex(size_t index)
+bool MainView::SetSelectedIndex(size_t index)
 {
-    if (index >= items_.size() || !items_[index].visible)
+    if (index >= cards_.size() || !cards_[index].visible)
     {
         return false;
     }
@@ -252,7 +208,7 @@ bool AppSwitcherXamlView::SetSelectedIndex(size_t index)
     return true;
 }
 
-bool AppSwitcherXamlView::MoveSelectionNext()
+bool MainView::MoveSelectionNext()
 {
     if (!CanNavigateSelection())
     {
@@ -265,26 +221,22 @@ bool AppSwitcherXamlView::MoveSelectionNext()
         return false;
     }
 
-    for (size_t i = selectedItemIndex_ + 1; i < items_.size(); ++i)
+    std::vector<ItemGeometry> geometries;
+    geometries.reserve(cards_.size());
+    for (const auto& item : cards_)
     {
-        if (items_[i].visible)
-        {
-            return SetSelectedIndex(i);
-        }
+        geometries.push_back({item.layoutPosition, item.layoutSize, item.visible});
     }
 
-    for (size_t i = 0; i < selectedItemIndex_; ++i)
+    const size_t nextIndex = LayoutEngine::GetNextVisibleIndex(geometries, selectedItemIndex_, true);
+    if (nextIndex != static_cast<size_t>(-1))
     {
-        if (items_[i].visible)
-        {
-            return SetSelectedIndex(i);
-        }
+        return SetSelectedIndex(nextIndex);
     }
-
     return false;
 }
 
-bool AppSwitcherXamlView::MoveSelectionPrevious()
+bool MainView::MoveSelectionPrevious()
 {
     if (!CanNavigateSelection())
     {
@@ -297,28 +249,23 @@ bool AppSwitcherXamlView::MoveSelectionPrevious()
         return false;
     }
 
-    for (size_t i = selectedItemIndex_; i > 0; --i)
+    std::vector<ItemGeometry> geometries;
+    geometries.reserve(cards_.size());
+    for (const auto& item : cards_)
     {
-        const size_t candidate = i - 1;
-        if (items_[candidate].visible)
-        {
-            return SetSelectedIndex(candidate);
-        }
+        geometries.push_back({item.layoutPosition, item.layoutSize, item.visible});
     }
 
-    for (size_t i = items_.size(); i > selectedItemIndex_ + 1; --i)
+    const size_t nextIndex = LayoutEngine::GetNextVisibleIndex(geometries, selectedItemIndex_, false);
+    if (nextIndex != static_cast<size_t>(-1))
     {
-        const size_t candidate = i - 1;
-        if (items_[candidate].visible)
-        {
-            return SetSelectedIndex(candidate);
-        }
+        return SetSelectedIndex(nextIndex);
     }
-
     return false;
 }
 
-bool AppSwitcherXamlView::MoveSelection(int stepX, int stepY)
+
+bool MainView::MoveSelection(int stepX, int stepY)
 {
     if (!CanNavigateSelection() || (stepX == 0 && stepY == 0))
     {
@@ -326,64 +273,27 @@ bool AppSwitcherXamlView::MoveSelection(int stepX, int stepY)
     }
 
     EnsureSelectedIndex();
-    if (selectedItemIndex_ == static_cast<size_t>(-1) || selectedItemIndex_ >= items_.size())
+    if (selectedItemIndex_ == static_cast<size_t>(-1) || selectedItemIndex_ >= cards_.size())
     {
         return false;
     }
 
-    const auto& current = items_[selectedItemIndex_];
-    const double currentCenterX = current.layoutPosition.x + current.layoutSize.width * 0.5;
-    const double currentCenterY = current.layoutPosition.y + current.layoutSize.height * 0.5;
-    size_t bestIndex = static_cast<size_t>(-1);
-    double bestDistance = std::numeric_limits<double>::max();
-
-    for (size_t i = 0; i < items_.size(); ++i)
+    std::vector<ItemGeometry> geometries;
+    geometries.reserve(cards_.size());
+    for (const auto& item : cards_)
     {
-        if (i == selectedItemIndex_ || !items_[i].visible)
-        {
-            continue;
-        }
-
-        const auto& candidate = items_[i];
-        const double candidateCenterX = candidate.layoutPosition.x + candidate.layoutSize.width * 0.5;
-        const double candidateCenterY = candidate.layoutPosition.y + candidate.layoutSize.height * 0.5;
-        const double dx = candidateCenterX - currentCenterX;
-        const double dy = candidateCenterY - currentCenterY;
-        bool matchesDirection = false;
-
-        if (stepX > 0 && dx > 10.0 && std::abs(dy) < candidate.layoutSize.height)
-        {
-            matchesDirection = true;
-        }
-        else if (stepX < 0 && dx < -10.0 && std::abs(dy) < candidate.layoutSize.height)
-        {
-            matchesDirection = true;
-        }
-        else if (stepY > 0 && dy > 10.0 && std::abs(dx) < candidate.layoutSize.width)
-        {
-            matchesDirection = true;
-        }
-        else if (stepY < 0 && dy < -10.0 && std::abs(dx) < candidate.layoutSize.width)
-        {
-            matchesDirection = true;
-        }
-
-        if (!matchesDirection)
-        {
-            continue;
-        }
-
-        const double distance = dx * dx + dy * dy;
-        if (distance < bestDistance)
-        {
-            bestDistance = distance;
-            bestIndex = i;
-        }
+        geometries.push_back({item.layoutPosition, item.layoutSize, item.visible});
     }
 
-    if (bestIndex != static_cast<size_t>(-1))
+    const size_t nextIndex = LayoutEngine::CalculateNextSelection(
+        geometries,
+        selectedItemIndex_,
+        stepX,
+        stepY);
+
+    if (nextIndex != static_cast<size_t>(-1))
     {
-        return SetSelectedIndex(bestIndex);
+        return SetSelectedIndex(nextIndex);
     }
 
     if (stepX > 0)
@@ -397,7 +307,8 @@ bool AppSwitcherXamlView::MoveSelection(int stepX, int stepY)
     return false;
 }
 
-bool AppSwitcherXamlView::ActivateSelectedItem()
+
+bool MainView::ActivateSelectedItem()
 {
     if (!CanNavigateSelection())
     {
@@ -405,12 +316,12 @@ bool AppSwitcherXamlView::ActivateSelectedItem()
     }
 
     EnsureSelectedIndex();
-    if (selectedItemIndex_ == static_cast<size_t>(-1) || selectedItemIndex_ >= items_.size())
+    if (selectedItemIndex_ == static_cast<size_t>(-1) || selectedItemIndex_ >= cards_.size())
     {
         return false;
     }
 
-    HWND hwnd = items_[selectedItemIndex_].hwnd;
+    HWND hwnd = cards_[selectedItemIndex_].hwnd;
     if (!hwnd || !itemActivatedCallback_)
     {
         return false;
@@ -420,12 +331,12 @@ bool AppSwitcherXamlView::ActivateSelectedItem()
     return true;
 }
 
-void AppSwitcherXamlView::AttachPointerHandlers()
+void MainView::AttachPointerHandlers()
 {
     // Item-level pointer handlers are attached when SwitcherItem instances are created.
 }
 
-void AppSwitcherXamlView::ApplyTheme(const AppSwitcherPalette& palette)
+void MainView::ApplyTheme(const AppSwitcherPalette& palette)
 {
     palette_ = palette;
 
@@ -456,13 +367,13 @@ void AppSwitcherXamlView::ApplyTheme(const AppSwitcherPalette& palette)
         emptyText_.Foreground(Brush(palette_.secondaryText));
     }
 
-    for (auto& item : items_)
+    for (auto& item : cards_)
     {
         item.ApplyTheme(palette_);
     }
 }
 
-void AppSwitcherXamlView::ResetInteractionState()
+void MainView::ResetInteractionState()
 {
     xamlPointerDragging_ = false;
     xamlPointerPressed_ = false;
@@ -475,7 +386,7 @@ void AppSwitcherXamlView::ResetInteractionState()
         appSwitcherContainer_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
     }
 
-    for (auto& item : items_)
+    for (auto& item : cards_)
     {
         item.hovered = false;
         item.pressed = false;
@@ -490,9 +401,9 @@ void AppSwitcherXamlView::ResetInteractionState()
     }
 }
 
-void AppSwitcherXamlView::BeginGrab(size_t itemIndex)
+void MainView::BeginGrab(size_t itemIndex)
 {
-    if (itemIndex >= items_.size())
+    if (itemIndex >= cards_.size())
     {
         return;
     }
@@ -507,9 +418,9 @@ void AppSwitcherXamlView::BeginGrab(size_t itemIndex)
         appSwitcherContainer_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
     }
 
-    for (size_t i = 0; i < items_.size(); ++i)
+    for (size_t i = 0; i < cards_.size(); ++i)
     {
-        auto& item = items_[i];
+        auto& item = cards_[i];
         item.pressed = false;
         item.grabbed = i == itemIndex;
         if (item.root && item.visible)
@@ -522,16 +433,16 @@ void AppSwitcherXamlView::BeginGrab(size_t itemIndex)
     }
 }
 
-void AppSwitcherXamlView::FinishPressedItem(size_t itemIndex, PointDip releasePoint)
+void MainView::FinishPressedItem(size_t itemIndex, PointDip releasePoint)
 {
-    if (itemIndex >= items_.size())
+    if (itemIndex >= cards_.size())
     {
         ResetInteractionState();
         return;
     }
 
-    HWND hwnd = items_[itemIndex].hwnd;
-    const bool wasGrabbed = items_[itemIndex].grabbed;
+    HWND hwnd = cards_[itemIndex].hwnd;
+    const bool wasGrabbed = cards_[itemIndex].grabbed;
     const POINT releaseScreenPoint = DipPointToScreenPixel(releasePoint);
     ResetInteractionState();
 
@@ -550,14 +461,14 @@ void AppSwitcherXamlView::FinishPressedItem(size_t itemIndex, PointDip releasePo
     }
 }
 
-void AppSwitcherXamlView::HandleItemCloseRequested(size_t itemIndex)
+void MainView::HandleItemCloseRequested(size_t itemIndex)
 {
-    if (itemIndex >= items_.size())
+    if (itemIndex >= cards_.size())
     {
         return;
     }
 
-    HWND hwnd = items_[itemIndex].hwnd;
+    HWND hwnd = cards_[itemIndex].hwnd;
     if (!hwnd)
     {
         return;
@@ -579,7 +490,7 @@ void AppSwitcherXamlView::HandleItemCloseRequested(size_t itemIndex)
     RenderSample(widthPx, heightPx, currentDpiScale_);
 }
 
-POINT AppSwitcherXamlView::DipPointToScreenPixel(PointDip point) const
+POINT MainView::DipPointToScreenPixel(PointDip point) const
 {
     POINT clientPoint{
         static_cast<LONG>(std::lround(static_cast<double>(point.x) * currentDpiScale_)),
@@ -588,7 +499,7 @@ POINT AppSwitcherXamlView::DipPointToScreenPixel(PointDip point) const
     return clientPoint;
 }
 
-void AppSwitcherXamlView::RenderSample(UINT widthPx, UINT heightPx, double scale)
+void MainView::RenderSample(UINT widthPx, UINT heightPx, double scale)
 {
     clientSizeDip_ = {
         static_cast<float>(static_cast<double>(widthPx) / std::max(0.01, scale)),
@@ -600,18 +511,18 @@ void AppSwitcherXamlView::RenderSample(UINT widthPx, UINT heightPx, double scale
         }),
         dismissedHwnds_.end());
 
-    auto windows = touchrev::appswitcher::EnumerateSwitcherWindows(hwnd_);
+    auto windows = touchrev::appswitcher::EnumerateActiveWindows(hwnd_);
     if (!dismissedHwnds_.empty())
     {
         windows.erase(
-            std::remove_if(windows.begin(), windows.end(), [this](const AppSwitcherWindowItem& window) {
+            std::remove_if(windows.begin(), windows.end(), [this](const WindowItem& window) {
                 return std::find(dismissedHwnds_.begin(), dismissedHwnds_.end(), window.hwnd) != dismissedHwnds_.end();
             }),
             windows.end());
     }
 
     std::wstringstream log;
-    log << L"EnumerateSwitcherWindows: count=" << windows.size();
+    log << L"EnumerateActiveWindows: count=" << windows.size();
     for (const auto& window : windows)
     {
         log << L"\n  hwnd=" << window.hwnd << L" title=" << window.title;
@@ -620,11 +531,11 @@ void AppSwitcherXamlView::RenderSample(UINT widthPx, UINT heightPx, double scale
     ApplyLayout(windows, widthPx, heightPx, scale);
 }
 
-bool AppSwitcherXamlView::LoadRoot()
+bool MainView::LoadRoot()
 {
     try
     {
-        const std::wstring xaml = LoadTextFileUtf8(ModuleRelativePath(kRootXamlPath));
+        const std::wstring xaml = touchrev::common::LoadTextFileUtf8(touchrev::common::ModuleRelativePath(kRootXamlPath));
         if (xaml.empty())
         {
             DebugLog(L"AppSwitcherRoot.xaml is empty or missing.");
@@ -669,169 +580,168 @@ bool AppSwitcherXamlView::LoadRoot()
     }
 }
 
-AppSwitcherItemView AppSwitcherXamlView::CreateItem()
+CardView MainView::CreateItem()
 {
-    AppSwitcherItemView item;
-    try
-    {
-        const std::wstring xaml = LoadTextFileUtf8(ModuleRelativePath(kItemXamlPath));
-        auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
-        item.root = object.as<winrt::Windows::UI::Xaml::FrameworkElement>();
-        item.transform = item.root.FindName(L"ItemTransform").as<winrt::Windows::UI::Xaml::Media::CompositeTransform>();
-        item.layoutGrid = item.root.FindName(L"ItemLayoutGrid").as<winrt::Windows::UI::Xaml::Controls::Grid>();
-        item.mainCard = item.root.FindName(L"MainCard").as<winrt::Windows::UI::Xaml::Controls::Border>();
-        item.titleBorder = item.root.FindName(L"TitleBorder").as<winrt::Windows::UI::Xaml::Controls::Border>();
-        item.title = item.root.FindName(L"TitleText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
-        item.defaultIcon = item.root.FindName(L"DefaultIcon").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
-        item.closeButton = item.root.FindName(L"CloseButton").as<winrt::Windows::UI::Xaml::Controls::Button>();
-        item.thumbnailHost = item.root.FindName(L"ContentFrame").as<winrt::Windows::UI::Xaml::Controls::Border>();
-        item.pressOverlay = item.root.FindName(L"PressOverlay").as<winrt::Windows::UI::Xaml::Controls::Border>();
-        item.ApplyRowWeights();
-        item.ApplyTheme(palette_);
+    const size_t itemIndex = cards_.size();
+    CardCallbacks callbacks;
 
-        const size_t itemIndex = items_.size();
-        item.root.PointerEntered([this, itemIndex](auto const&, auto const&) {
-            if (itemIndex >= items_.size() || xamlPointerPressed_ || xamlPointerDragging_)
-            {
-                return;
-            }
+    callbacks.onCloseClicked = [this](size_t index) {
+        HandleItemCloseRequested(index);
+    };
 
-            items_[itemIndex].hovered = true;
-            items_[itemIndex].ApplyInteractionState(palette_);
-        });
+    callbacks.onPointerPressed = [this](size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+        ProcessItemPressed(index, args);
+    };
 
-        item.root.PointerExited([this, itemIndex](auto const&, auto const&) {
-            if (itemIndex >= items_.size() || xamlPointerPressed_ || xamlPointerDragging_)
-            {
-                return;
-            }
+    callbacks.onPointerMoved = [this](size_t, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+        ProcessItemMoved(args);
+    };
 
-            items_[itemIndex].hovered = false;
-            items_[itemIndex].ApplyInteractionState(palette_);
-        });
+    callbacks.onPointerReleased = [this](size_t, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+        ProcessItemReleased(args);
+    };
 
-        if (item.closeButton)
+    callbacks.onPointerCanceled = [this](size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+        if (index < cards_.size())
         {
-            item.closeButton.Click([this, itemIndex](auto const&, winrt::Windows::UI::Xaml::RoutedEventArgs const&) {
-                HandleItemCloseRequested(itemIndex);
-            });
-            item.closeButton.PointerEntered([this, itemIndex](auto const&, auto const&) {
-                if (itemIndex < items_.size())
-                {
-                    items_[itemIndex].ApplyCloseButtonHoverState(palette_, true);
-                }
-            });
-            item.closeButton.PointerExited([this, itemIndex](auto const&, auto const&) {
-                if (itemIndex < items_.size())
-                {
-                    items_[itemIndex].ApplyCloseButtonHoverState(palette_, false);
-                }
-            });
+            cards_[index].root.ReleasePointerCapture(args.Pointer());
         }
+        ResetInteractionState();
+        args.Handled(true);
+    };
 
-        item.root.PointerPressed([this, itemIndex](auto const& sender, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
-            if (!root_ || itemIndex >= items_.size())
-            {
-                return;
-            }
+    callbacks.onPointerEntered = [this](size_t index) {
+        if (index < cards_.size())
+        {
+            cards_[index].hovered = true;
+            cards_[index].ApplyInteractionState(palette_);
+        }
+    };
 
-            const auto point = args.GetCurrentPoint(root_).Position();
-            const PointDip logicalPoint{
-                static_cast<float>(point.X + visibleOriginDip_.x),
-                static_cast<float>(point.Y + visibleOriginDip_.y)};
-            selectedItemIndex_ = itemIndex;
-            pressedItemIndex_ = itemIndex;
-            activeDragItemIndex_ = itemIndex;
-            xamlPointerPressed_ = true;
-            xamlPointerDragging_ = false;
-            pressPointDip_ = logicalPoint;
-            xamlDragOffsetX_ = logicalPoint.x - items_[itemIndex].layoutPosition.x;
-            xamlDragOffsetY_ = logicalPoint.y - items_[itemIndex].layoutPosition.y;
-            items_[itemIndex].pressed = true;
-            items_[itemIndex].hovered = false;
-            items_[itemIndex].ApplyInteractionState(palette_);
-            sender.template as<winrt::Windows::UI::Xaml::UIElement>().CapturePointer(args.Pointer());
-            args.Handled(true);
-        });
+    callbacks.onPointerExited = [this](size_t index) {
+        if (index < cards_.size())
+        {
+            cards_[index].hovered = false;
+            cards_[index].ApplyInteractionState(palette_);
+        }
+    };
 
-        item.root.PointerMoved([this](auto const&, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
-            if ((!xamlPointerPressed_ && !xamlPointerDragging_) || !root_ || activeDragItemIndex_ >= items_.size())
-            {
-                return;
-            }
+    callbacks.onCloseButtonHoverChanged = [this](size_t index, bool isHovered) {
+        if (index < cards_.size())
+        {
+            cards_[index].ApplyCloseButtonHoverState(palette_, isHovered);
+        }
+    };
 
-            const auto point = args.GetCurrentPoint(root_).Position();
-            const PointDip logicalPoint{
-                static_cast<float>(point.X + visibleOriginDip_.x),
-                static_cast<float>(point.Y + visibleOriginDip_.y)};
-            auto& activeItem = items_[activeDragItemIndex_];
-            constexpr double dragThresholdDip = 10.0;
-            if (xamlPointerPressed_ && Distance(logicalPoint, pressPointDip_) > dragThresholdDip)
-            {
-                BeginGrab(activeDragItemIndex_);
-            }
-
-            if (xamlPointerDragging_)
-            {
-                activeItem.layoutPosition = {
-                    static_cast<float>(std::clamp(static_cast<double>(logicalPoint.x) - xamlDragOffsetX_, 0.0, std::max(0.0, static_cast<double>(clientSizeDip_.width) - activeItem.layoutSize.width))),
-                    static_cast<float>(std::clamp(static_cast<double>(logicalPoint.y) - xamlDragOffsetY_, 0.0, std::max(0.0, static_cast<double>(clientSizeDip_.height) - activeItem.layoutSize.height)))};
-                UpdateVisibleBoundsAndPositions();
-                if (boundsChangedCallback_)
-                {
-                    boundsChangedCallback_();
-                }
-            }
-            args.Handled(true);
-        });
-
-        auto endInteraction = [this](auto const& sender, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
-            if (!xamlPointerPressed_ && !xamlPointerDragging_)
-            {
-                return;
-            }
-
-            const size_t itemIndexToFinish = activeDragItemIndex_;
-            const auto point = root_ ? args.GetCurrentPoint(root_).Position() : winrt::Windows::Foundation::Point{};
-            const PointDip releasePoint{
-                static_cast<float>(point.X + visibleOriginDip_.x),
-                static_cast<float>(point.Y + visibleOriginDip_.y)};
-            sender.template as<winrt::Windows::UI::Xaml::UIElement>().ReleasePointerCapture(args.Pointer());
-            FinishPressedItem(itemIndexToFinish, releasePoint);
-            args.Handled(true);
-        };
-
-        item.root.PointerReleased(endInteraction);
-        item.root.PointerCanceled([this](auto const& sender, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
-            sender.template as<winrt::Windows::UI::Xaml::UIElement>().ReleasePointerCapture(args.Pointer());
-            ResetInteractionState();
-            args.Handled(true);
-        });
-
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetZIndex(item.root, 10);
-        layoutCanvas_.Children().Append(item.root);
-    }
-    catch (const winrt::hresult_error& error)
+    auto itemOpt = CardView::Create(palette_, itemIndex, callbacks);
+    if (!itemOpt)
     {
-        DebugLogHResult(L"XamlReader::Load(SwitcherItem)", error.code());
+        return {};
     }
+
+    CardView item = std::move(*itemOpt);
+    winrt::Windows::UI::Xaml::Controls::Canvas::SetZIndex(item.root, 10);
+    layoutCanvas_.Children().Append(item.root);
     return item;
 }
 
-void AppSwitcherXamlView::EnsureItemCount(size_t count)
+void MainView::ProcessItemPressed(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)
 {
-    while (items_.size() < count)
+    DebugLog(L"[DEBUG] ProcessItemPressed index=" + std::to_wstring(index));
+    if (!root_ || index >= cards_.size())
     {
-        AppSwitcherItemView item = CreateItem();
+        return;
+    }
+
+    const auto point = args.GetCurrentPoint(root_).Position();
+    const PointDip logicalPoint{
+        static_cast<float>(point.X + visibleOriginDip_.x),
+        static_cast<float>(point.Y + visibleOriginDip_.y)};
+    selectedItemIndex_ = index;
+    pressedItemIndex_ = index;
+    activeDragItemIndex_ = index;
+    xamlPointerPressed_ = true;
+    xamlPointerDragging_ = false;
+    pressPointDip_ = logicalPoint;
+    xamlDragOffsetX_ = logicalPoint.x - cards_[index].layoutPosition.x;
+    xamlDragOffsetY_ = logicalPoint.y - cards_[index].layoutPosition.y;
+    cards_[index].pressed = true;
+    cards_[index].hovered = false;
+    cards_[index].ApplyInteractionState(palette_);
+    cards_[index].root.CapturePointer(args.Pointer());
+    args.Handled(true);
+}
+
+void MainView::ProcessItemMoved(winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)
+{
+    DebugLog(L"[DEBUG] ProcessItemMoved pressed=" + std::to_wstring(xamlPointerPressed_) + L" dragging=" + std::to_wstring(xamlPointerDragging_) + L" activeIndex=" + std::to_wstring(activeDragItemIndex_));
+    if ((!xamlPointerPressed_ && !xamlPointerDragging_) || !root_ || activeDragItemIndex_ >= cards_.size())
+    {
+        return;
+    }
+
+    const auto point = args.GetCurrentPoint(root_).Position();
+    const PointDip logicalPoint{
+        static_cast<float>(point.X + visibleOriginDip_.x),
+        static_cast<float>(point.Y + visibleOriginDip_.y)};
+    auto& activeItem = cards_[activeDragItemIndex_];
+    constexpr double dragThresholdDip = 10.0;
+    if (xamlPointerPressed_ && touchrev::common::Distance(logicalPoint, pressPointDip_) > dragThresholdDip)
+    {
+        BeginGrab(activeDragItemIndex_);
+    }
+
+    if (xamlPointerDragging_)
+    {
+        activeItem.layoutPosition = {
+            static_cast<float>(std::clamp(static_cast<double>(logicalPoint.x) - xamlDragOffsetX_, 0.0, std::max(0.0, static_cast<double>(clientSizeDip_.width) - activeItem.layoutSize.width))),
+            static_cast<float>(std::clamp(static_cast<double>(logicalPoint.y) - xamlDragOffsetY_, 0.0, std::max(0.0, static_cast<double>(clientSizeDip_.height) - activeItem.layoutSize.height)))};
+        UpdateVisibleBoundsAndPositions();
+        if (boundsChangedCallback_)
+        {
+            boundsChangedCallback_();
+        }
+    }
+    args.Handled(true);
+}
+
+void MainView::ProcessItemReleased(winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)
+{
+    if (!xamlPointerPressed_ && !xamlPointerDragging_)
+    {
+        return;
+    }
+
+    const size_t itemIndexToFinish = activeDragItemIndex_;
+    const auto point = root_ ? args.GetCurrentPoint(root_).Position() : winrt::Windows::Foundation::Point{};
+    const PointDip releasePoint{
+        static_cast<float>(point.X + visibleOriginDip_.x),
+        static_cast<float>(point.Y + visibleOriginDip_.y)};
+    if (itemIndexToFinish < cards_.size())
+    {
+        cards_[itemIndexToFinish].root.ReleasePointerCapture(args.Pointer());
+    }
+    FinishPressedItem(itemIndexToFinish, releasePoint);
+    args.Handled(true);
+}
+
+
+
+
+void MainView::EnsureItemCount(size_t count)
+{
+    while (cards_.size() < count)
+    {
+        CardView item = CreateItem();
         if (!item.root)
         {
             break;
         }
-        items_.push_back(std::move(item));
+        cards_.push_back(std::move(item));
     }
 }
 
-void AppSwitcherXamlView::UpdateVisibleBoundsAndPositions()
+void MainView::UpdateVisibleBoundsAndPositions()
 {
     visibleOriginDip_ = {};
     visibleBoundsDip_ = {
@@ -858,7 +768,7 @@ void AppSwitcherXamlView::UpdateVisibleBoundsAndPositions()
         appSwitcherContainer_.Height(contentBoundsDip_.height);
     }
 
-    for (auto& item : items_)
+    for (auto& item : cards_)
     {
         if (!item.root || !item.visible)
         {
@@ -873,17 +783,17 @@ void AppSwitcherXamlView::UpdateVisibleBoundsAndPositions()
     UpdateSelectionVisual();
 }
 
-void AppSwitcherXamlView::EnsureSelectedIndex()
+void MainView::EnsureSelectedIndex()
 {
-    if (selectedItemIndex_ < items_.size() && items_[selectedItemIndex_].visible)
+    if (selectedItemIndex_ < cards_.size() && cards_[selectedItemIndex_].visible)
     {
         return;
     }
 
     selectedItemIndex_ = static_cast<size_t>(-1);
-    for (size_t i = 0; i < items_.size(); ++i)
+    for (size_t i = 0; i < cards_.size(); ++i)
     {
-        if (items_[i].visible)
+        if (cards_[i].visible)
         {
             selectedItemIndex_ = i;
             return;
@@ -891,7 +801,7 @@ void AppSwitcherXamlView::EnsureSelectedIndex()
     }
 }
 
-void AppSwitcherXamlView::UpdateSelectionVisual()
+void MainView::UpdateSelectionVisual()
 {
     if (!focusBorder_)
     {
@@ -899,13 +809,13 @@ void AppSwitcherXamlView::UpdateSelectionVisual()
     }
 
     if (xamlPointerDragging_ || selectedItemIndex_ == static_cast<size_t>(-1) ||
-        selectedItemIndex_ >= items_.size() || !items_[selectedItemIndex_].visible)
+        selectedItemIndex_ >= cards_.size() || !cards_[selectedItemIndex_].visible)
     {
         focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
         return;
     }
 
-    const auto& selectedItem = items_[selectedItemIndex_];
+    const auto& selectedItem = cards_[selectedItemIndex_];
     constexpr double inflationDip = 10.0;
     winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(
         focusBorder_,
@@ -918,8 +828,8 @@ void AppSwitcherXamlView::UpdateSelectionVisual()
     focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
 }
 
-void AppSwitcherXamlView::ApplyLayout(
-    const std::vector<AppSwitcherWindowItem>& windows,
+void MainView::ApplyLayout(
+    const std::vector<WindowItem>& windows,
     UINT widthPx,
     UINT heightPx,
     double scale)
@@ -933,7 +843,7 @@ void AppSwitcherXamlView::ApplyLayout(
     const double safeScale = std::max(0.01, scale);
     currentDpiScale_ = safeScale;
     RECT workArea{0, 0, static_cast<LONG>(std::max(1u, widthPx)), static_cast<LONG>(std::max(1u, heightPx))};
-    const AppSwitcherLayoutResult layout = AppSwitcherLayoutEngine::Calculate(windows, workArea, safeScale);
+    const LayoutResult layout = LayoutEngine::Calculate(windows, workArea, safeScale);
     contentBoundsDip_ = {
         static_cast<float>(static_cast<double>(layout.totalSizePx.cx) / safeScale),
         static_cast<float>(static_cast<double>(layout.totalSizePx.cy) / safeScale)};
@@ -948,10 +858,10 @@ void AppSwitcherXamlView::ApplyLayout(
         pressedItemIndex_ = static_cast<size_t>(-1);
     }
 
-    for (size_t i = 0; i < items_.size(); ++i)
+    for (size_t i = 0; i < cards_.size(); ++i)
     {
         const bool visible = i < windows.size() && i < layout.items.size();
-        auto& item = items_[i];
+        auto& item = cards_[i];
         if (!item.root)
         {
             continue;
@@ -967,8 +877,8 @@ void AppSwitcherXamlView::ApplyLayout(
         const RECT& rect = layout.items[i].rectPx;
         const double x = static_cast<double>(rect.left) / safeScale;
         const double y = static_cast<double>(rect.top) / safeScale;
-        const double w = static_cast<double>(RectWidth(rect)) / safeScale;
-        const double h = static_cast<double>(RectHeight(rect)) / safeScale;
+        const double w = static_cast<double>(touchrev::common::RectWidth(rect)) / safeScale;
+        const double h = static_cast<double>(touchrev::common::RectHeight(rect)) / safeScale;
 
         item.AssignWindow(windows[i].hwnd);
         item.visible = true;
@@ -987,7 +897,7 @@ void AppSwitcherXamlView::ApplyLayout(
         const double thumbnailWidth = std::max(1.0, w);
         const double thumbnailHeight = std::max(
             1.0,
-            h * AppSwitcherLayoutEngine::ContentRowWeight / AppSwitcherLayoutEngine::TotalRowWeight);
+            h * LayoutEngine::ContentRowWeight / LayoutEngine::TotalRowWeight);
         item.EnsureThumbnail(thumbnailManager_, thumbnailWidth, thumbnailHeight, currentDpiScale_);
     }
 
@@ -1004,30 +914,6 @@ void AppSwitcherXamlView::ApplyLayout(
         boundsChangedCallback_();
     }
 }
-
-std::wstring AppSwitcherXamlView::LoadTextFileUtf8(const std::wstring& path)
-{
-    std::ifstream file(path.c_str(), std::ios::binary);
-    if (!file)
-    {
-        return {};
-    }
-
-    std::ostringstream stream;
-    stream << file.rdbuf();
-    return ToWideFromUtf8(stream.str());
 }
 
-std::wstring AppSwitcherXamlView::ModuleRelativePath(const std::wstring& relativePath)
-{
-    wchar_t modulePath[MAX_PATH]{};
-    const DWORD length = GetModuleFileNameW(nullptr, modulePath, static_cast<DWORD>(std::size(modulePath)));
-    std::wstring path(modulePath, modulePath + length);
-    const size_t slash = path.find_last_of(L"\\/");
-    if (slash != std::wstring::npos)
-    {
-        path.resize(slash + 1);
-    }
-    path += relativePath;
-    return path;
-}
+

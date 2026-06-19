@@ -2,7 +2,7 @@
 
 #include "ThinXamlAppSwitcherHost.h"
 #include "ThemeManager.h"
-#include "appswitcher/AppSwitcherXamlView.h"
+#include "appswitcher/MainView.h"
 #include "common/CoordinateSpace.h"
 #include "input/InputController.h"
 
@@ -71,5 +71,5 @@ private:
     InputController inputController_;
     ThemeManager themeManager_;
     ThinXamlAppSwitcherHost xamlHost_;
-    AppSwitcherXamlView appSwitcherXamlView_;
+    touchrev::appswitcher::MainView appSwitcherMainView_;
 };

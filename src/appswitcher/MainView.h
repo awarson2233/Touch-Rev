@@ -1,7 +1,7 @@
 #pragma once
 
-#include "AppSwitcherItemView.h"
-#include "AppSwitcherLayoutEngine.h"
+#include "CardView.h"
+#include "LayoutEngine.h"
 #include "common/CoordinateSpace.h"
 #include "thumbnail/PrivateThumbnailManager.h"
 #include "ui/ThemeManager.h"
@@ -13,13 +13,15 @@
 
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
+#include <winrt/Windows.UI.Xaml.Input.h>
+
 
 #include <functional>
-#include <memory>
-#include <string>
 #include <vector>
 
-class AppSwitcherXamlView
+namespace touchrev::appswitcher
+{
+class MainView
 {
 public:
     bool Initialize(HWND hwnd, ThinXamlAppSwitcherHost& host);
@@ -45,9 +47,9 @@ public:
 
 private:
     bool LoadRoot();
-    AppSwitcherItemView CreateItem();
+    CardView CreateItem();
     void EnsureItemCount(size_t count);
-    void ApplyLayout(const std::vector<AppSwitcherWindowItem>& windows, UINT widthPx, UINT heightPx, double scale);
+    void ApplyLayout(const std::vector<WindowItem>& windows, UINT widthPx, UINT heightPx, double scale);
     void AttachPointerHandlers();
     void UpdateVisibleBoundsAndPositions();
     void EnsureSelectedIndex();
@@ -59,11 +61,12 @@ private:
     void FinishPressedItem(size_t itemIndex, PointDip releasePoint);
     void HandleItemCloseRequested(size_t itemIndex);
     POINT DipPointToScreenPixel(PointDip point) const;
-
-    static std::wstring LoadTextFileUtf8(const std::wstring& path);
-    static std::wstring ModuleRelativePath(const std::wstring& relativePath);
+    void ProcessItemPressed(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args);
+    void ProcessItemMoved(winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args);
+    void ProcessItemReleased(winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args);
 
     HWND hwnd_ = nullptr;
+
     ThinXamlAppSwitcherHost* host_ = nullptr;
     bool initialized_ = false;
 
@@ -74,7 +77,7 @@ private:
     winrt::Windows::UI::Xaml::FrameworkElement emptyGrid_{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock emptyIcon_{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock emptyText_{nullptr};
-    std::vector<AppSwitcherItemView> items_;
+    std::vector<CardView> cards_;
     PointDip dragPosition_{};
     PointDip contentOriginDip_{};
     PointDip visibleOriginDip_{};
@@ -99,3 +102,4 @@ private:
     AppSwitcherPalette palette_{};
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
 };
+}

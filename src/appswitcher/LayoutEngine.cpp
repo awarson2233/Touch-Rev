@@ -1,7 +1,8 @@
-#include "AppSwitcherLayoutEngine.h"
+#include "LayoutEngine.h"
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
 
 namespace
 {
@@ -28,12 +29,14 @@ int HeightOf(const RECT& rect)
 }
 }
 
-AppSwitcherLayoutResult AppSwitcherLayoutEngine::Calculate(
-    const std::vector<AppSwitcherWindowItem>& windows,
+namespace touchrev::appswitcher
+{
+LayoutResult LayoutEngine::Calculate(
+    const std::vector<WindowItem>& windows,
     const RECT& workAreaPx,
     double scale)
 {
-    AppSwitcherLayoutResult result;
+    LayoutResult result;
     const size_t count = windows.size();
     if (count == 0)
     {
@@ -181,3 +184,131 @@ AppSwitcherLayoutResult AppSwitcherLayoutEngine::Calculate(
         static_cast<LONG>(std::ceil(curY + paddingPx * 2.0))};
     return result;
 }
+
+size_t LayoutEngine::CalculateNextSelection(
+    const std::vector<ItemGeometry>& items,
+    size_t currentIndex,
+    int stepX,
+    int stepY)
+{
+    if (currentIndex == static_cast<size_t>(-1) || currentIndex >= items.size() || (stepX == 0 && stepY == 0))
+    {
+        return static_cast<size_t>(-1);
+    }
+
+    const auto& current = items[currentIndex];
+    const double currentCenterX = current.position.x + current.size.width * 0.5;
+    const double currentCenterY = current.position.y + current.size.height * 0.5;
+    size_t bestIndex = static_cast<size_t>(-1);
+    double bestDistance = std::numeric_limits<double>::max();
+
+    for (size_t i = 0; i < items.size(); ++i)
+    {
+        if (i == currentIndex || !items[i].visible)
+        {
+            continue;
+        }
+
+        const auto& candidate = items[i];
+        const double candidateCenterX = candidate.position.x + candidate.size.width * 0.5;
+        const double candidateCenterY = candidate.position.y + candidate.size.height * 0.5;
+        const double dx = candidateCenterX - currentCenterX;
+        const double dy = candidateCenterY - currentCenterY;
+        bool matchesDirection = false;
+
+        if (stepX > 0 && dx > 10.0 && std::abs(dy) < candidate.size.height)
+        {
+            matchesDirection = true;
+        }
+        else if (stepX < 0 && dx < -10.0 && std::abs(dy) < candidate.size.height)
+        {
+            matchesDirection = true;
+        }
+        else if (stepY > 0 && dy > 10.0 && std::abs(dx) < candidate.size.width)
+        {
+            matchesDirection = true;
+        }
+        else if (stepY < 0 && dy < -10.0 && std::abs(dx) < candidate.size.width)
+        {
+            matchesDirection = true;
+        }
+
+        if (!matchesDirection)
+        {
+            continue;
+        }
+
+        const double distance = dx * dx + dy * dy;
+        if (distance < bestDistance)
+        {
+            bestDistance = distance;
+            bestIndex = i;
+        }
+    }
+
+    return bestIndex;
+}
+
+size_t LayoutEngine::GetNextVisibleIndex(
+    const std::vector<ItemGeometry>& items,
+    size_t currentIndex,
+    bool forward)
+{
+    if (items.empty())
+    {
+        return static_cast<size_t>(-1);
+    }
+
+    if (currentIndex == static_cast<size_t>(-1) || currentIndex >= items.size())
+    {
+        for (size_t i = 0; i < items.size(); ++i)
+        {
+            if (items[i].visible)
+            {
+                return i;
+            }
+        }
+        return static_cast<size_t>(-1);
+    }
+
+    if (forward)
+    {
+        for (size_t i = currentIndex + 1; i < items.size(); ++i)
+        {
+            if (items[i].visible)
+            {
+                return i;
+            }
+        }
+        for (size_t i = 0; i < currentIndex; ++i)
+        {
+            if (items[i].visible)
+            {
+                return i;
+            }
+        }
+    }
+    else
+    {
+        for (size_t i = currentIndex; i > 0; --i)
+        {
+            const size_t candidate = i - 1;
+            if (items[candidate].visible)
+            {
+                return candidate;
+            }
+        }
+        for (size_t i = items.size(); i > currentIndex + 1; --i)
+        {
+            const size_t candidate = i - 1;
+            if (items[candidate].visible)
+            {
+                return candidate;
+            }
+        }
+    }
+    return static_cast<size_t>(-1);
+}
+}
+
+

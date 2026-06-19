@@ -1,6 +1,6 @@
 #include "AppWindow.h"
 
-#include "appswitcher/AppSwitcherWindowing.h"
+#include "appswitcher/WindowController.h"
 #include "common/Win32Error.h"
 
 #include <algorithm>
@@ -202,7 +202,7 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             hwnd_,
             wParam,
             coordinates_,
-            appSwitcherXamlView_.DragPosition(),
+            appSwitcherMainView_.DragPosition(),
             canStartDrag));
         return 0;
     }
@@ -234,7 +234,7 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
                 }
 
                 POINT screenPoint{TOUCH_COORD_TO_PIXEL(input.x), TOUCH_COORD_TO_PIXEL(input.y)};
-                if (!appSwitcherXamlView_.HitTest(coordinates_.ScreenPixelsToDips(hwnd_, screenPoint)))
+                if (!appSwitcherMainView_.HitTest(coordinates_.ScreenPixelsToDips(hwnd_, screenPoint)))
                 {
                     CloseTouchInputHandle(reinterpret_cast<HTOUCHINPUT>(lParam));
                     Hide();
@@ -248,7 +248,7 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             wParam,
             lParam,
             coordinates_,
-            appSwitcherXamlView_.DragPosition(),
+            appSwitcherMainView_.DragPosition(),
             true));
         return 0;
     }
@@ -266,7 +266,7 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             hwnd_,
             lParam,
             coordinates_,
-            appSwitcherXamlView_.DragPosition(),
+            appSwitcherMainView_.DragPosition(),
             canStartDrag));
         return 0;
     }
@@ -310,27 +310,27 @@ HRESULT AppWindow::OnCreate()
         return E_FAIL;
     }
 
-    appSwitcherXamlView_.SetMissedInputCallback([this]() {
+    appSwitcherMainView_.SetMissedInputCallback([this]() {
         Hide();
     });
-    appSwitcherXamlView_.SetItemActivatedCallback([this](HWND targetHwnd) {
+    appSwitcherMainView_.SetItemActivatedCallback([this](HWND targetHwnd) {
         touchrev::appswitcher::ActivateWindow(targetHwnd);
         Hide();
     });
-    appSwitcherXamlView_.SetItemDragReleasedCallback([this](HWND targetHwnd, POINT releasePoint) {
-        touchrev::appswitcher::ExpandWindowAroundPoint(targetHwnd, releasePoint, targetWorkAreaPx_);
+    appSwitcherMainView_.SetItemDragReleasedCallback([this](HWND targetHwnd, POINT releasePoint) {
+        touchrev::appswitcher::RestoreAndCenterWindow(targetHwnd, releasePoint, targetWorkAreaPx_);
         Hide();
     });
-    appSwitcherXamlView_.SetItemCloseRequestedCallback([](HWND targetHwnd) {
+    appSwitcherMainView_.SetItemCloseRequestedCallback([](HWND targetHwnd) {
         return touchrev::appswitcher::RequestCloseWindow(targetHwnd);
     });
 
-    if (!appSwitcherXamlView_.Initialize(hwnd_, xamlHost_))
+    if (!appSwitcherMainView_.Initialize(hwnd_, xamlHost_))
     {
         DebugLog(L"XAML AppSwitcher view initialization failed.");
         return E_FAIL;
     }
-    appSwitcherXamlView_.ApplyTheme(themeManager_.Palette());
+    appSwitcherMainView_.ApplyTheme(themeManager_.Palette());
     UpdateTransparentRegion();
 
     return S_OK;
@@ -338,7 +338,7 @@ HRESULT AppWindow::OnCreate()
 
 void AppWindow::OnDestroy()
 {
-    appSwitcherXamlView_.Shutdown();
+    appSwitcherMainView_.Shutdown();
     xamlHost_.Shutdown();
     PostQuitMessage(0);
 }
@@ -383,7 +383,7 @@ void AppWindow::RefreshTheme()
     const bool changed = themeManager_.Refresh(hwnd_);
     if (changed)
     {
-        appSwitcherXamlView_.ApplyTheme(themeManager_.Palette());
+        appSwitcherMainView_.ApplyTheme(themeManager_.Palette());
     }
     UpdateTransparentRegion();
 }
@@ -394,18 +394,18 @@ void AppWindow::SyncClientLayout(UINT width, UINT height, bool renderSwitcher)
     xamlHost_.Resize(width, height);
     if (renderSwitcher)
     {
-        appSwitcherXamlView_.RenderSample(width, height, coordinates_.Scale());
+        appSwitcherMainView_.RenderSample(width, height, coordinates_.Scale());
     }
     else
     {
-        appSwitcherXamlView_.Resize(width, height, coordinates_.Scale());
+        appSwitcherMainView_.Resize(width, height, coordinates_.Scale());
     }
     UpdateTransparentRegion();
 }
 
 void AppWindow::RebaseActiveDrag()
 {
-    inputController_.RebaseActiveDrag(hwnd_, appSwitcherXamlView_.DragPosition(), coordinates_);
+    inputController_.RebaseActiveDrag(hwnd_, appSwitcherMainView_.DragPosition(), coordinates_);
 }
 
 void AppWindow::UpdateTransparentRegion()
@@ -456,7 +456,7 @@ void AppWindow::Hide()
     }
 
     inputController_.Cancel(hwnd_);
-    appSwitcherXamlView_.CancelInteraction();
+    appSwitcherMainView_.CancelInteraction();
     ShowWindow(hwnd_, SW_HIDE);
     isVisible_ = false;
 }
@@ -487,7 +487,7 @@ void AppWindow::HandleInputResult(const InputController::Result& result)
 {
     if (result.positionChanged || result.dragEnded)
     {
-        appSwitcherXamlView_.SetDragPosition(result.position);
+        appSwitcherMainView_.SetDragPosition(result.position);
     }
 }
 
@@ -501,26 +501,26 @@ bool AppWindow::HandleKeyDown(WPARAM key)
 
     case VK_RETURN:
     case VK_SPACE:
-        return appSwitcherXamlView_.ActivateSelectedItem();
+        return appSwitcherMainView_.ActivateSelectedItem();
 
     case VK_TAB:
         if ((GetKeyState(VK_SHIFT) & 0x8000) != 0)
         {
-            return appSwitcherXamlView_.MoveSelectionPrevious();
+            return appSwitcherMainView_.MoveSelectionPrevious();
         }
-        return appSwitcherXamlView_.MoveSelectionNext();
+        return appSwitcherMainView_.MoveSelectionNext();
 
     case VK_LEFT:
-        return appSwitcherXamlView_.MoveSelection(-1, 0);
+        return appSwitcherMainView_.MoveSelection(-1, 0);
 
     case VK_RIGHT:
-        return appSwitcherXamlView_.MoveSelection(1, 0);
+        return appSwitcherMainView_.MoveSelection(1, 0);
 
     case VK_UP:
-        return appSwitcherXamlView_.MoveSelection(0, -1);
+        return appSwitcherMainView_.MoveSelection(0, -1);
 
     case VK_DOWN:
-        return appSwitcherXamlView_.MoveSelection(0, 1);
+        return appSwitcherMainView_.MoveSelection(0, 1);
     }
 
     return false;
@@ -572,13 +572,13 @@ bool AppWindow::CanStartDragFromPointer(WPARAM wParam) const
         return false;
     }
 
-    return appSwitcherXamlView_.HitTest(coordinates_.ScreenPixelsToDips(hwnd_, pointerInfo.ptPixelLocation));
+    return appSwitcherMainView_.HitTest(coordinates_.ScreenPixelsToDips(hwnd_, pointerInfo.ptPixelLocation));
 }
 
 bool AppWindow::CanStartDragFromMouse(LPARAM lParam) const
 {
     POINT clientPoint{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
-    return appSwitcherXamlView_.HitTest(coordinates_.ClientPixelsToDips(clientPoint));
+    return appSwitcherMainView_.HitTest(coordinates_.ClientPixelsToDips(clientPoint));
 }
 
 UINT AppWindow::ClientWidthFromLParam(LPARAM lParam)

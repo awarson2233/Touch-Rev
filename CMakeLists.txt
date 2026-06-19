@@ -12,14 +12,14 @@ add_executable(TouchRevGUI WIN32
     app.manifest
     src/ui/AppWindow.cpp
     src/ui/AppWindow.h
-    src/appswitcher/AppSwitcherItemView.cpp
-    src/appswitcher/AppSwitcherItemView.h
-    src/appswitcher/AppSwitcherLayoutEngine.cpp
-    src/appswitcher/AppSwitcherLayoutEngine.h
-    src/appswitcher/AppSwitcherWindowing.cpp
-    src/appswitcher/AppSwitcherWindowing.h
-    src/appswitcher/AppSwitcherXamlView.cpp
-    src/appswitcher/AppSwitcherXamlView.h
+    src/appswitcher/CardView.cpp
+    src/appswitcher/CardView.h
+    src/appswitcher/LayoutEngine.cpp
+    src/appswitcher/LayoutEngine.h
+    src/appswitcher/WindowController.cpp
+    src/appswitcher/WindowController.h
+    src/appswitcher/MainView.cpp
+    src/appswitcher/MainView.h
     src/ui/ThinXamlAppSwitcherHost.cpp
     src/ui/ThinXamlAppSwitcherHost.h
     src/ui/ThemeManager.cpp

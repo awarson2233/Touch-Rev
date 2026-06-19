@@ -1,6 +1,8 @@
-#include "AppSwitcherItemView.h"
+#include "CardView.h"
 
-#include "AppSwitcherLayoutEngine.h"
+#include "LayoutEngine.h"
+#include "common/FileUtils.h"
+#include "common/PathUtils.h"
 
 #ifdef GetCurrentTime
 #undef GetCurrentTime
@@ -9,8 +11,15 @@
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
-#include <winrt/Windows.UI.Xaml.h>
+#include <winrt/Windows.UI.Xaml.Input.h>
+#include <winrt/Windows.UI.Xaml.Controls.h>
+#include <winrt/Windows.UI.Xaml.Media.h>
+#include <winrt/Windows.UI.Input.h>
+#include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.UI.Xaml.Hosting.h>
+#include <winrt/Windows.UI.Xaml.Markup.h>
+
+
 
 #include <cmath>
 #include <sstream>
@@ -49,7 +58,133 @@ bool ShouldRecreateThumbnail(
 }
 }
 
-void AppSwitcherItemView::ApplyRowWeights()
+namespace touchrev::appswitcher
+{
+std::optional<CardView> CardView::Create(
+    const AppSwitcherPalette& palette,
+    size_t index,
+    CardCallbacks callbacks)
+{
+    CardView item;
+    try
+    {
+        constexpr wchar_t kItemXamlPath[] = L"xaml/SwitcherItem.xaml";
+        const std::wstring xaml = touchrev::common::LoadTextFileUtf8(touchrev::common::ModuleRelativePath(kItemXamlPath));
+        auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
+        auto rootElement = object.as<winrt::Windows::UI::Xaml::FrameworkElement>();
+
+        if (item.Initialize(rootElement, palette, index, callbacks))
+        {
+            return item;
+        }
+    }
+    catch (const winrt::hresult_error&)
+    {
+    }
+    return std::nullopt;
+}
+
+bool CardView::Initialize(
+    winrt::Windows::UI::Xaml::FrameworkElement rootElement,
+    const AppSwitcherPalette& palette,
+    size_t index,
+    CardCallbacks callbacks)
+{
+    root = rootElement;
+    if (!root)
+    {
+        return false;
+    }
+
+    try
+    {
+        transform = root.FindName(L"ItemTransform").as<winrt::Windows::UI::Xaml::Media::CompositeTransform>();
+        layoutGrid = root.FindName(L"ItemLayoutGrid").as<winrt::Windows::UI::Xaml::Controls::Grid>();
+        mainCard = root.FindName(L"MainCard").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        titleBorder = root.FindName(L"TitleBorder").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        title = root.FindName(L"TitleText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
+        defaultIcon = root.FindName(L"DefaultIcon").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
+        closeButton = root.FindName(L"CloseButton").as<winrt::Windows::UI::Xaml::Controls::Button>();
+        thumbnailHost = root.FindName(L"ContentFrame").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        pressOverlay = root.FindName(L"PressOverlay").as<winrt::Windows::UI::Xaml::Controls::Border>();
+
+        ApplyRowWeights();
+        ApplyTheme(palette);
+
+        root.PointerEntered([callbacks, index](auto const&, auto const&) {
+            if (callbacks.onPointerEntered)
+            {
+                callbacks.onPointerEntered(index);
+            }
+        });
+
+        root.PointerExited([callbacks, index](auto const&, auto const&) {
+            if (callbacks.onPointerExited)
+            {
+                callbacks.onPointerExited(index);
+            }
+        });
+
+
+        if (closeButton)
+        {
+            closeButton.Click([callbacks, index](auto const&, auto const&) {
+                if (callbacks.onCloseClicked)
+                {
+                    callbacks.onCloseClicked(index);
+                }
+            });
+            closeButton.PointerEntered([callbacks, index](auto const&, auto const&) {
+                if (callbacks.onCloseButtonHoverChanged)
+                {
+                    callbacks.onCloseButtonHoverChanged(index, true);
+                }
+            });
+            closeButton.PointerExited([callbacks, index](auto const&, auto const&) {
+                if (callbacks.onCloseButtonHoverChanged)
+                {
+                    callbacks.onCloseButtonHoverChanged(index, false);
+                }
+            });
+        }
+
+        root.PointerPressed([callbacks, index](auto const&, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+            if (callbacks.onPointerPressed)
+            {
+                callbacks.onPointerPressed(index, args);
+            }
+        });
+
+        root.PointerMoved([callbacks, index](auto const&, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+            if (callbacks.onPointerMoved)
+            {
+                callbacks.onPointerMoved(index, args);
+            }
+        });
+
+        root.PointerReleased([callbacks, index](auto const&, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+            if (callbacks.onPointerReleased)
+            {
+                callbacks.onPointerReleased(index, args);
+            }
+        });
+
+        root.PointerCanceled([callbacks, index](auto const&, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
+            if (callbacks.onPointerCanceled)
+            {
+                callbacks.onPointerCanceled(index, args);
+            }
+        });
+
+        return true;
+    }
+    catch (const winrt::hresult_error&)
+    {
+        return false;
+    }
+}
+
+void CardView::ApplyRowWeights()
 {
     if (!layoutGrid)
     {
@@ -63,14 +198,14 @@ void AppSwitcherItemView::ApplyRowWeights()
     }
 
     rows.GetAt(0).Height(winrt::Windows::UI::Xaml::GridLengthHelper::FromValueAndType(
-        AppSwitcherLayoutEngine::TitleRowWeight,
+        LayoutEngine::TitleRowWeight,
         winrt::Windows::UI::Xaml::GridUnitType::Star));
     rows.GetAt(1).Height(winrt::Windows::UI::Xaml::GridLengthHelper::FromValueAndType(
-        AppSwitcherLayoutEngine::ContentRowWeight,
+        LayoutEngine::ContentRowWeight,
         winrt::Windows::UI::Xaml::GridUnitType::Star));
 }
 
-void AppSwitcherItemView::ApplyTheme(const AppSwitcherPalette& palette)
+void CardView::ApplyTheme(const AppSwitcherPalette& palette)
 {
     if (mainCard)
     {
@@ -109,7 +244,7 @@ void AppSwitcherItemView::ApplyTheme(const AppSwitcherPalette& palette)
     }
 }
 
-void AppSwitcherItemView::ApplyInteractionState(const AppSwitcherPalette& palette)
+void CardView::ApplyInteractionState(const AppSwitcherPalette& palette)
 {
     if (titleBorder)
     {
@@ -140,7 +275,7 @@ void AppSwitcherItemView::ApplyInteractionState(const AppSwitcherPalette& palett
     }
 }
 
-void AppSwitcherItemView::ApplyCloseButtonHoverState(const AppSwitcherPalette& palette, bool isHovered)
+void CardView::ApplyCloseButtonHoverState(const AppSwitcherPalette& palette, bool isHovered)
 {
     if (!closeButton)
     {
@@ -151,7 +286,7 @@ void AppSwitcherItemView::ApplyCloseButtonHoverState(const AppSwitcherPalette& p
     closeButton.Foreground(Brush(isHovered ? palette.closeButtonHoverText : palette.buttonText));
 }
 
-void AppSwitcherItemView::ClearThumbnail()
+void CardView::ClearThumbnail()
 {
     if (thumbnailSlot)
     {
@@ -167,7 +302,7 @@ void AppSwitcherItemView::ClearThumbnail()
     thumbnailFailed = false;
 }
 
-void AppSwitcherItemView::Reset(const AppSwitcherPalette& palette)
+void CardView::Reset(const AppSwitcherPalette& palette)
 {
     ClearThumbnail();
     hwnd = nullptr;
@@ -180,7 +315,7 @@ void AppSwitcherItemView::Reset(const AppSwitcherPalette& palette)
     ApplyInteractionState(palette);
 }
 
-void AppSwitcherItemView::SetRootVisibility(bool isVisible)
+void CardView::SetRootVisibility(bool isVisible)
 {
     if (!root)
     {
@@ -192,7 +327,7 @@ void AppSwitcherItemView::SetRootVisibility(bool isVisible)
                         : winrt::Windows::UI::Xaml::Visibility::Collapsed);
 }
 
-void AppSwitcherItemView::AssignWindow(HWND newHwnd)
+void CardView::AssignWindow(HWND newHwnd)
 {
     if (hwnd != nullptr && hwnd != newHwnd)
     {
@@ -201,7 +336,7 @@ void AppSwitcherItemView::AssignWindow(HWND newHwnd)
     hwnd = newHwnd;
 }
 
-void AppSwitcherItemView::ApplyTitle(const std::wstring& titleText, size_t fallbackOrdinal)
+void CardView::ApplyTitle(const std::wstring& titleText, size_t fallbackOrdinal)
 {
     if (!title)
     {
@@ -219,7 +354,7 @@ void AppSwitcherItemView::ApplyTitle(const std::wstring& titleText, size_t fallb
     title.Text(winrt::hstring{fallback.str()});
 }
 
-void AppSwitcherItemView::ApplyCloseButtonWidth(double widthDip)
+void CardView::ApplyCloseButtonWidth(double widthDip)
 {
     if (closeButton)
     {
@@ -227,7 +362,7 @@ void AppSwitcherItemView::ApplyCloseButtonWidth(double widthDip)
     }
 }
 
-void AppSwitcherItemView::EnsureThumbnail(
+void CardView::EnsureThumbnail(
     touchrev::thumbnail::PrivateThumbnailManager& thumbnailManager,
     double widthDip,
     double heightDip,
@@ -243,11 +378,11 @@ void AppSwitcherItemView::EnsureThumbnail(
     ApplyContentClip(thumbnailHost, widthDip, heightDip);
 
     const bool needsThumbnail = !thumbnailSlot || ShouldRecreateThumbnail(
-                                                  *thumbnailSlot,
-                                                  hwnd,
-                                                  widthDip,
-                                                  heightDip,
-                                                  dpiScale);
+                                                   *thumbnailSlot,
+                                                   hwnd,
+                                                   widthDip,
+                                                   heightDip,
+                                                   dpiScale);
     if (needsThumbnail && !thumbnailFailed)
     {
         if (thumbnailSlot)
@@ -282,3 +417,20 @@ void AppSwitcherItemView::EnsureThumbnail(
             heightDip);
     }
 }
+
+void CardView::Destroy()
+{
+    ClearThumbnail();
+    root = nullptr;
+    transform = nullptr;
+    layoutGrid = nullptr;
+    mainCard = nullptr;
+    titleBorder = nullptr;
+    title = nullptr;
+    defaultIcon = nullptr;
+    closeButton = nullptr;
+    thumbnailHost = nullptr;
+    pressOverlay = nullptr;
+}
+}
+

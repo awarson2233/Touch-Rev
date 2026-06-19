@@ -11,11 +11,30 @@
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
+#include <winrt/Windows.UI.Input.h>
+#include <winrt/Windows.UI.Xaml.Input.h>
 
 #include <memory>
 #include <string>
+#include <functional>
+#include <optional>
 
-class AppSwitcherItemView
+namespace touchrev::appswitcher
+{
+struct CardCallbacks
+{
+    std::function<void(size_t index)> onCloseClicked;
+    std::function<void(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)> onPointerPressed;
+    std::function<void(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)> onPointerMoved;
+    std::function<void(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)> onPointerReleased;
+    std::function<void(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)> onPointerCanceled;
+    std::function<void(size_t index)> onPointerEntered;
+    std::function<void(size_t index)> onPointerExited;
+    std::function<void(size_t index, bool isHovered)> onCloseButtonHoverChanged;
+};
+
+
+class CardView
 {
 public:
     winrt::Windows::UI::Xaml::FrameworkElement root{nullptr};
@@ -39,6 +58,26 @@ public:
     bool pressed = false;
     bool grabbed = false;
 
+    static std::optional<CardView> Create(
+        const AppSwitcherPalette& palette,
+        size_t index,
+        CardCallbacks callbacks);
+
+    CardView() = default;
+    ~CardView() { Destroy(); }
+
+    CardView(CardView&&) noexcept = default;
+    CardView& operator=(CardView&&) noexcept = default;
+
+    CardView(const CardView&) = delete;
+    CardView& operator=(const CardView&) = delete;
+
+    bool Initialize(
+        winrt::Windows::UI::Xaml::FrameworkElement rootElement,
+        const AppSwitcherPalette& palette,
+        size_t index,
+        CardCallbacks callbacks);
+
     void ApplyRowWeights();
     void ApplyTheme(const AppSwitcherPalette& palette);
     void ApplyInteractionState(const AppSwitcherPalette& palette);
@@ -54,4 +93,11 @@ public:
         double widthDip,
         double heightDip,
         double dpiScale);
+
+private:
+    void Destroy();
 };
+}
+
+
+

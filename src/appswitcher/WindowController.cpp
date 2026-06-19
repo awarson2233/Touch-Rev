@@ -1,4 +1,4 @@
-#include "AppSwitcherWindowing.h"
+#include "WindowController.h"
 
 #include "common/Win32Error.h"
 
@@ -80,12 +80,12 @@ bool IsAltTabLikeWindow(HWND hwnd)
 
 namespace touchrev::appswitcher
 {
-std::vector<AppSwitcherWindowItem> EnumerateSwitcherWindows(HWND excludeHwnd)
+std::vector<WindowItem> EnumerateActiveWindows(HWND excludeHwnd)
 {
     struct EnumState
     {
         HWND exclude = nullptr;
-        std::vector<AppSwitcherWindowItem> windows;
+        std::vector<WindowItem> windows;
     } state{excludeHwnd};
 
     EnumWindows(
@@ -138,7 +138,7 @@ bool RequestCloseWindow(HWND targetHwnd)
     return false;
 }
 
-void ExpandWindowAroundPoint(HWND targetHwnd, POINT centerPoint, const RECT& fallbackWorkAreaPx)
+void RestoreAndCenterWindow(HWND targetHwnd, POINT centerPoint, const RECT& fallbackWorkAreaPx)
 {
     if (!IsWindow(targetHwnd))
     {
