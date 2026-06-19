@@ -12,14 +12,10 @@ add_executable(TouchRevGUI WIN32
     app.manifest
     src/ui/AppWindow.cpp
     src/ui/AppWindow.h
-    src/ui/AppTheme.cpp
-    src/ui/AppTheme.h
     src/ui/AppSwitcherLayoutEngine.cpp
     src/ui/AppSwitcherLayoutEngine.h
     src/ui/AppSwitcherXamlView.cpp
     src/ui/AppSwitcherXamlView.h
-    src/ui/BackdropController.cpp
-    src/ui/BackdropController.h
     src/ui/ThinXamlAppSwitcherHost.cpp
     src/ui/ThinXamlAppSwitcherHost.h
     src/ui/ThemeManager.cpp
@@ -32,6 +28,8 @@ add_executable(TouchRevGUI WIN32
     src/input/InputController.h
     src/input/raw/RawTouchInput.cpp
     src/input/raw/RawTouchInput.h
+    src/input/gesture/ThreeFingerGestureRecognizer.cpp
+    src/input/gesture/ThreeFingerGestureRecognizer.h
     src/common/Win32Error.cpp
     src/common/Win32Error.h
 )

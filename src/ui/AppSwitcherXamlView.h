@@ -1,7 +1,7 @@
 #pragma once
 
 #include "AppSwitcherLayoutEngine.h"
-#include "AppTheme.h"
+#include "ThemeManager.h"
 #include "ThinXamlAppSwitcherHost.h"
 #include "common/CoordinateSpace.h"
 #include "thumbnail/PrivateThumbnailManager.h"
@@ -126,6 +126,6 @@ private:
     std::function<void(HWND, POINT)> itemDragReleasedCallback_;
     std::function<bool(HWND)> itemCloseRequestedCallback_;
     std::vector<HWND> dismissedHwnds_;
-    AppSwitcherPalette palette_ = PaletteForTheme(AppThemeMode::Dark);
+    AppSwitcherPalette palette_{};
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
 };

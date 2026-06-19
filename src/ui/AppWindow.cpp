@@ -167,7 +167,7 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         return 0;
 
     case kWmDwmCompositionChanged:
-        ApplyBackdropAndBackgroundMode();
+        themeManager_.ApplyWindowBackdrop(hwnd_);
         return 0;
 
     case WM_KEYDOWN:
@@ -179,8 +179,14 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         break;
 
     case WM_INPUT:
-        inputController_.OnRawInput(lParam);
+    {
+        const InputController::RawInputResult inputResult = inputController_.OnRawInput(lParam);
+        if (inputResult.action == InputController::InputAction::ShowSwitcher)
+        {
+            ShowSwitcher();
+        }
         return 0;
+    }
 
     case WM_POINTERDOWN:
     {
@@ -294,8 +300,7 @@ HRESULT AppWindow::OnCreate()
 {
     dpi_ = static_cast<float>(GetDpiForWindow(hwnd_));
     coordinates_.Update(dpi_, GetClientWidth(hwnd_), GetClientHeight(hwnd_));
-    themeManager_.Initialize();
-    ApplyBackdropAndBackgroundMode();
+    themeManager_.Initialize(hwnd_);
     inputController_.Initialize(hwnd_);
 
     if (!xamlHost_.Initialize(hwnd_))
@@ -381,15 +386,9 @@ void AppWindow::OnPaint()
     EndPaint(hwnd_, &paint);
 }
 
-void AppWindow::ApplyBackdropAndBackgroundMode()
-{
-    backdropController_.Apply(hwnd_, BackdropController::ShouldUseDarkMode());
-}
-
 void AppWindow::RefreshTheme()
 {
-    const bool changed = themeManager_.Refresh();
-    ApplyBackdropAndBackgroundMode();
+    const bool changed = themeManager_.Refresh(hwnd_);
     if (changed)
     {
         appSwitcherXamlView_.ApplyTheme(themeManager_.Palette());

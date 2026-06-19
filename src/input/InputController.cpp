@@ -66,6 +66,7 @@ void InputController::Cancel(HWND hwnd)
     dragOffsetX_ = 0.0f;
     dragOffsetY_ = 0.0f;
     rawTouchInput_.Reset();
+    gestureRecognizer_.Reset();
     ResetSamples();
 }
 
@@ -226,9 +227,21 @@ InputController::Result InputController::OnTouch(
     return result;
 }
 
-RawTouchInput::Frame InputController::OnRawInput(LPARAM lParam)
+InputController::RawInputResult InputController::OnRawInput(LPARAM lParam)
 {
-    return rawTouchInput_.ProcessRawInput(lParam);
+    const RawTouchInput::Frame frame = rawTouchInput_.ProcessRawInput(lParam);
+    if (!frame.HasTouch() && !(frame.frameSync && frame.contactCount == 0))
+    {
+        return {.handled = true};
+    }
+
+    const ThreeFingerGestureRecognizer::Result gestureResult = gestureRecognizer_.ProcessFrame(frame);
+    if (gestureResult.type == ThreeFingerGestureRecognizer::EventType::DoubleTap)
+    {
+        return {.handled = true, .action = InputAction::ShowSwitcher};
+    }
+
+    return {.handled = true};
 }
 
 PointDip InputController::EvaluateVisualPosition() const

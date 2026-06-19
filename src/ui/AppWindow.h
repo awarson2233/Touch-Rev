@@ -1,7 +1,6 @@
 #pragma once
 
 #include "AppSwitcherXamlView.h"
-#include "BackdropController.h"
 #include "ThinXamlAppSwitcherHost.h"
 #include "ThemeManager.h"
 #include "common/CoordinateSpace.h"
@@ -41,7 +40,6 @@ private:
     void OnSize(UINT width, UINT height);
     void OnDpiChanged(WPARAM wParam, LPARAM lParam);
     void OnPaint();
-    void ApplyBackdropAndBackgroundMode();
     void RefreshTheme();
     void UpdateTransparentRegion();
     void ActivateWindow(HWND targetHwnd);
@@ -70,7 +68,6 @@ private:
     bool isVisible_ = false;
     bool isExiting_ = false;
 
-    BackdropController backdropController_;
     CoordinateSpace coordinates_;
     InputController inputController_;
     ThemeManager themeManager_;

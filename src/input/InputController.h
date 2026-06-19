@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common/CoordinateSpace.h"
+#include "input/gesture/ThreeFingerGestureRecognizer.h"
 #include "input/raw/RawTouchInput.h"
 
 #include <windows.h>
@@ -19,6 +20,18 @@ public:
         PointDip position{};
     };
 
+    enum class InputAction
+    {
+        None,
+        ShowSwitcher,
+    };
+
+    struct RawInputResult
+    {
+        bool handled = false;
+        InputAction action = InputAction::None;
+    };
+
     void Initialize(HWND hwnd);
     void Cancel(HWND hwnd);
 
@@ -32,7 +45,7 @@ public:
     Result OnMouseUp(HWND hwnd);
 
     Result OnTouch(HWND hwnd, WPARAM wParam, LPARAM lParam, const CoordinateSpace& coordinates, PointDip currentPosition, bool canStartDrag);
-    RawTouchInput::Frame OnRawInput(LPARAM lParam);
+    RawInputResult OnRawInput(LPARAM lParam);
 
     bool IsDragging() const { return pointerDragging_ || mouseDragging_ || touchDragging_; }
     PointDip EvaluateVisualPosition() const;
@@ -66,6 +79,7 @@ private:
     float dragOffsetY_ = 0.0f;
     PointDip currentPosition_{};
     RawTouchInput rawTouchInput_;
+    ThreeFingerGestureRecognizer gestureRecognizer_;
     PointerSample previousSample_{};
     PointerSample latestSample_{};
     float smoothedVelocityX_ = 0.0f;
