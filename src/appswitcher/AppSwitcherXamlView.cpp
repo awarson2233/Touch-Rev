@@ -1,8 +1,7 @@
 #include "AppSwitcherXamlView.h"
 
+#include "AppSwitcherWindowing.h"
 #include "common/Win32Error.h"
-
-#include <dwmapi.h>
 
 #ifdef GetCurrentTime
 #undef GetCurrentTime
@@ -42,196 +41,11 @@ int RectHeight(const RECT& rect)
     return rect.bottom - rect.top;
 }
 
-LONG RectIntersectionArea(const RECT& a, const RECT& b)
-{
-    const LONG left = std::max(a.left, b.left);
-    const LONG top = std::max(a.top, b.top);
-    const LONG right = std::min(a.right, b.right);
-    const LONG bottom = std::min(a.bottom, b.bottom);
-    if (right <= left || bottom <= top)
-    {
-        return 0;
-    }
-    return (right - left) * (bottom - top);
-}
-
-RECT MonitorRect(HMONITOR monitor)
-{
-    MONITORINFO monitorInfo{};
-    monitorInfo.cbSize = sizeof(monitorInfo);
-    if (!monitor || !GetMonitorInfoW(monitor, &monitorInfo))
-    {
-        return {0, 0, 0, 0};
-    }
-    return monitorInfo.rcMonitor;
-}
-
-bool WindowBelongsToMonitor(const RECT& windowRect, HMONITOR targetMonitor)
-{
-    if (!targetMonitor)
-    {
-        return true;
-    }
-
-    const RECT targetRect = MonitorRect(targetMonitor);
-    const LONG targetArea = RectIntersectionArea(windowRect, targetRect);
-    if (targetArea <= 0)
-    {
-        return false;
-    }
-
-    struct EnumState
-    {
-        RECT windowRect{};
-        HMONITOR targetMonitor = nullptr;
-        LONG bestArea = 0;
-        HMONITOR bestMonitor = nullptr;
-    } state{windowRect, targetMonitor};
-
-    EnumDisplayMonitors(
-        nullptr,
-        nullptr,
-        [](HMONITOR monitor, HDC, LPRECT monitorRect, LPARAM param) -> BOOL {
-            auto& state = *reinterpret_cast<EnumState*>(param);
-            const LONG area = RectIntersectionArea(state.windowRect, *monitorRect);
-            if (area > state.bestArea)
-            {
-                state.bestArea = area;
-                state.bestMonitor = monitor;
-            }
-            return TRUE;
-        },
-        reinterpret_cast<LPARAM>(&state));
-
-    return state.bestMonitor == targetMonitor;
-}
-
-std::wstring GetWindowDisplayTitle(HWND hwnd)
-{
-    wchar_t title[256]{};
-    GetWindowTextW(hwnd, title, static_cast<int>(std::size(title)));
-    if (title[0] != L'\0')
-    {
-        return title;
-    }
-
-    wchar_t className[128]{};
-    GetClassNameW(hwnd, className, static_cast<int>(std::size(className)));
-    if (className[0] != L'\0')
-    {
-        std::wstringstream fallback;
-        fallback << className << L" " << hwnd;
-        return fallback.str();
-    }
-
-    std::wstringstream fallback;
-    fallback << L"Window " << hwnd;
-    return fallback.str();
-}
-
-bool TryGetSwitcherWindowRect(HWND hwnd, RECT& rect)
-{
-    if (IsIconic(hwnd))
-    {
-        WINDOWPLACEMENT placement{};
-        placement.length = sizeof(placement);
-        if (GetWindowPlacement(hwnd, &placement))
-        {
-            rect = placement.rcNormalPosition;
-            return rect.right > rect.left && rect.bottom > rect.top;
-        }
-    }
-
-    return GetWindowRect(hwnd, &rect) && rect.right > rect.left && rect.bottom > rect.top;
-}
-
-bool IsAltTabLikeWindow(HWND hwnd)
-{
-    if (!IsWindowVisible(hwnd))
-    {
-        return false;
-    }
-
-    const LONG_PTR exStyle = GetWindowLongPtrW(hwnd, GWL_EXSTYLE);
-    if ((exStyle & WS_EX_TOOLWINDOW) != 0)
-    {
-        return false;
-    }
-
-    BOOL cloaked = FALSE;
-    if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
-    {
-        return false;
-    }
-
-    RECT rect{};
-    if (!TryGetSwitcherWindowRect(hwnd, rect))
-    {
-        return false;
-    }
-
-    return rect.right - rect.left >= 80 && rect.bottom - rect.top >= 60;
-}
-
-std::vector<AppSwitcherWindowItem> EnumerateSwitcherWindows(HWND excludeHwnd, HMONITOR)
-{
-    struct EnumState
-    {
-        HWND exclude = nullptr;
-        std::vector<AppSwitcherWindowItem> windows;
-    } state{excludeHwnd};
-
-    EnumWindows(
-        [](HWND hwnd, LPARAM param) -> BOOL {
-            auto& state = *reinterpret_cast<EnumState*>(param);
-            if (hwnd == state.exclude || !IsAltTabLikeWindow(hwnd))
-            {
-                return TRUE;
-            }
-
-            RECT rect{};
-            if (!TryGetSwitcherWindowRect(hwnd, rect))
-            {
-                return TRUE;
-            }
-
-            state.windows.push_back({
-                hwnd,
-                static_cast<double>(std::max<LONG>(1, rect.right - rect.left)),
-                static_cast<double>(std::max<LONG>(1, rect.bottom - rect.top)),
-                GetWindowDisplayTitle(hwnd)});
-            return TRUE;
-        },
-        reinterpret_cast<LPARAM>(&state));
-
-    return state.windows;
-}
-
-void ApplyContentClip(winrt::Windows::UI::Xaml::FrameworkElement const& element, double width, double height)
-{
-    auto clip = winrt::Windows::UI::Xaml::Media::RectangleGeometry();
-    clip.Rect({0.0f, 0.0f, static_cast<float>(width), static_cast<float>(height)});
-    element.Clip(clip);
-}
-
 double Distance(PointDip a, PointDip b)
 {
     const double dx = static_cast<double>(a.x - b.x);
     const double dy = static_cast<double>(a.y - b.y);
     return std::sqrt(dx * dx + dy * dy);
-}
-
-bool ShouldRecreateThumbnail(
-    const touchrev::thumbnail::PrivateThumbnailSlot& slot,
-    HWND hwnd,
-    double widthDip,
-    double heightDip,
-    double dpiScale)
-{
-    return slot.hwnd != hwnd ||
-           std::abs(slot.displayWidthDip - widthDip) > 8.0 ||
-           std::abs(slot.displayHeightDip - heightDip) > 8.0 ||
-           std::abs(slot.dpiScale - dpiScale) > 0.01;
 }
 
 winrt::Windows::UI::Xaml::Media::SolidColorBrush Brush(winrt::Windows::UI::Color color)
@@ -316,7 +130,7 @@ void AppSwitcherXamlView::Shutdown()
 {
     for (auto& item : items_)
     {
-        ResetItem(item);
+        item.Reset(palette_);
     }
     items_.clear();
     appSwitcherContainer_ = nullptr;
@@ -394,11 +208,6 @@ RECT AppSwitcherXamlView::ContainerBoundsPx() const
 void AppSwitcherXamlView::SetDragPosition(PointDip position)
 {
     dragPosition_ = position;
-}
-
-void AppSwitcherXamlView::SetTargetMonitor(HMONITOR monitor)
-{
-    targetMonitor_ = monitor;
 }
 
 void AppSwitcherXamlView::SetBoundsChangedCallback(std::function<void()> callback)
@@ -649,98 +458,7 @@ void AppSwitcherXamlView::ApplyTheme(const AppSwitcherPalette& palette)
 
     for (auto& item : items_)
     {
-        ApplyItemTheme(item);
-    }
-}
-
-void AppSwitcherXamlView::ApplyItemTheme(ItemView& item)
-{
-    if (item.mainCard)
-    {
-        item.mainCard.Background(Brush(palette_.cardBackground));
-    }
-
-    ApplyItemInteractionState(item);
-
-    if (item.thumbnailHost)
-    {
-        item.thumbnailHost.Background(Brush(palette_.contentBackground));
-    }
-
-    if (item.title)
-    {
-        item.title.Foreground(Brush(palette_.primaryText));
-    }
-
-    if (item.defaultIcon)
-    {
-        item.defaultIcon.Foreground(Brush(palette_.iconText));
-    }
-
-    if (item.closeButton)
-    {
-        item.closeButton.Foreground(Brush(palette_.buttonText));
-        item.closeButton.Background(Brush(winrt::Windows::UI::Color{0x00, 0x00, 0x00, 0x00}));
-
-        auto resources = item.closeButton.Resources();
-        resources.Insert(winrt::box_value(L"ButtonBackground"), Brush(winrt::Windows::UI::Color{0x00, 0x00, 0x00, 0x00}));
-        resources.Insert(winrt::box_value(L"ButtonForeground"), Brush(palette_.buttonText));
-        resources.Insert(winrt::box_value(L"ButtonBackgroundPointerOver"), Brush(palette_.closeButtonHoverBackground));
-        resources.Insert(winrt::box_value(L"ButtonForegroundPointerOver"), Brush(palette_.closeButtonHoverText));
-        resources.Insert(winrt::box_value(L"ButtonBackgroundPressed"), Brush(palette_.closeButtonHoverBackground));
-        resources.Insert(winrt::box_value(L"ButtonForegroundPressed"), Brush(palette_.closeButtonHoverText));
-    }
-}
-
-void AppSwitcherXamlView::ApplyItemRowWeights(ItemView& item)
-{
-    if (!item.layoutGrid)
-    {
-        return;
-    }
-
-    const auto rows = item.layoutGrid.RowDefinitions();
-    if (rows.Size() < 2)
-    {
-        return;
-    }
-
-    rows.GetAt(0).Height(winrt::Windows::UI::Xaml::GridLengthHelper::FromValueAndType(
-        AppSwitcherLayoutEngine::TitleRowWeight,
-        winrt::Windows::UI::Xaml::GridUnitType::Star));
-    rows.GetAt(1).Height(winrt::Windows::UI::Xaml::GridLengthHelper::FromValueAndType(
-        AppSwitcherLayoutEngine::ContentRowWeight,
-        winrt::Windows::UI::Xaml::GridUnitType::Star));
-}
-
-void AppSwitcherXamlView::ApplyItemInteractionState(ItemView& item)
-{
-    if (item.titleBorder)
-    {
-        item.titleBorder.Background(Brush(item.hovered ? palette_.titleHoverBackground : palette_.titleBackground));
-    }
-
-    if (item.pressOverlay)
-    {
-        if (item.grabbed || item.pressed)
-        {
-            const auto overlayColor = item.grabbed
-                                          ? winrt::Windows::UI::Color{0x33, 0x00, 0x00, 0x00}
-                                          : winrt::Windows::UI::Color{0x22, 0x00, 0x00, 0x00};
-            item.pressOverlay.Background(Brush(overlayColor));
-            item.pressOverlay.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
-        }
-        else
-        {
-            item.pressOverlay.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
-        }
-    }
-
-    if (item.transform)
-    {
-        const double scale = item.grabbed ? 0.90 : item.pressed ? 0.985 : 1.0;
-        item.transform.ScaleX(scale);
-        item.transform.ScaleY(scale);
+        item.ApplyTheme(palette_);
     }
 }
 
@@ -768,7 +486,7 @@ void AppSwitcherXamlView::ResetInteractionState()
                                      ? winrt::Windows::UI::Xaml::Visibility::Visible
                                      : winrt::Windows::UI::Xaml::Visibility::Collapsed);
         }
-        ApplyItemInteractionState(item);
+        item.ApplyInteractionState(palette_);
     }
 }
 
@@ -800,7 +518,7 @@ void AppSwitcherXamlView::BeginGrab(size_t itemIndex)
                                      ? winrt::Windows::UI::Xaml::Visibility::Visible
                                      : winrt::Windows::UI::Xaml::Visibility::Collapsed);
         }
-        ApplyItemInteractionState(item);
+        item.ApplyInteractionState(palette_);
     }
 }
 
@@ -870,35 +588,6 @@ POINT AppSwitcherXamlView::DipPointToScreenPixel(PointDip point) const
     return clientPoint;
 }
 
-void AppSwitcherXamlView::ClearItemThumbnail(ItemView& item)
-{
-    if (item.thumbnailSlot)
-    {
-        touchrev::thumbnail::PrivateThumbnailManager::ClearSlot(item.thumbnailHost, *item.thumbnailSlot);
-        item.thumbnailSlot.reset();
-    }
-    else if (item.thumbnailHost)
-    {
-        winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(item.thumbnailHost, nullptr);
-    }
-
-    item.thumbnailError = S_OK;
-    item.thumbnailFailed = false;
-}
-
-void AppSwitcherXamlView::ResetItem(ItemView& item)
-{
-    ClearItemThumbnail(item);
-    item.hwnd = nullptr;
-    item.layoutPosition = {};
-    item.layoutSize = {};
-    item.visible = false;
-    item.hovered = false;
-    item.pressed = false;
-    item.grabbed = false;
-    ApplyItemInteractionState(item);
-}
-
 void AppSwitcherXamlView::RenderSample(UINT widthPx, UINT heightPx, double scale)
 {
     clientSizeDip_ = {
@@ -911,7 +600,7 @@ void AppSwitcherXamlView::RenderSample(UINT widthPx, UINT heightPx, double scale
         }),
         dismissedHwnds_.end());
 
-    auto windows = EnumerateSwitcherWindows(hwnd_, targetMonitor_);
+    auto windows = touchrev::appswitcher::EnumerateSwitcherWindows(hwnd_);
     if (!dismissedHwnds_.empty())
     {
         windows.erase(
@@ -980,9 +669,9 @@ bool AppSwitcherXamlView::LoadRoot()
     }
 }
 
-AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
+AppSwitcherItemView AppSwitcherXamlView::CreateItem()
 {
-    ItemView item;
+    AppSwitcherItemView item;
     try
     {
         const std::wstring xaml = LoadTextFileUtf8(ModuleRelativePath(kItemXamlPath));
@@ -997,8 +686,8 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
         item.closeButton = item.root.FindName(L"CloseButton").as<winrt::Windows::UI::Xaml::Controls::Button>();
         item.thumbnailHost = item.root.FindName(L"ContentFrame").as<winrt::Windows::UI::Xaml::Controls::Border>();
         item.pressOverlay = item.root.FindName(L"PressOverlay").as<winrt::Windows::UI::Xaml::Controls::Border>();
-        ApplyItemRowWeights(item);
-        ApplyItemTheme(item);
+        item.ApplyRowWeights();
+        item.ApplyTheme(palette_);
 
         const size_t itemIndex = items_.size();
         item.root.PointerEntered([this, itemIndex](auto const&, auto const&) {
@@ -1008,7 +697,7 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
             }
 
             items_[itemIndex].hovered = true;
-            ApplyItemInteractionState(items_[itemIndex]);
+            items_[itemIndex].ApplyInteractionState(palette_);
         });
 
         item.root.PointerExited([this, itemIndex](auto const&, auto const&) {
@@ -1018,7 +707,7 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
             }
 
             items_[itemIndex].hovered = false;
-            ApplyItemInteractionState(items_[itemIndex]);
+            items_[itemIndex].ApplyInteractionState(palette_);
         });
 
         if (item.closeButton)
@@ -1027,17 +716,15 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
                 HandleItemCloseRequested(itemIndex);
             });
             item.closeButton.PointerEntered([this, itemIndex](auto const&, auto const&) {
-                if (itemIndex < items_.size() && items_[itemIndex].closeButton)
+                if (itemIndex < items_.size())
                 {
-                    items_[itemIndex].closeButton.Background(Brush(palette_.closeButtonHoverBackground));
-                    items_[itemIndex].closeButton.Foreground(Brush(palette_.closeButtonHoverText));
+                    items_[itemIndex].ApplyCloseButtonHoverState(palette_, true);
                 }
             });
             item.closeButton.PointerExited([this, itemIndex](auto const&, auto const&) {
-                if (itemIndex < items_.size() && items_[itemIndex].closeButton)
+                if (itemIndex < items_.size())
                 {
-                    items_[itemIndex].closeButton.Background(Brush(winrt::Windows::UI::Color{0x00, 0x00, 0x00, 0x00}));
-                    items_[itemIndex].closeButton.Foreground(Brush(palette_.buttonText));
+                    items_[itemIndex].ApplyCloseButtonHoverState(palette_, false);
                 }
             });
         }
@@ -1062,7 +749,7 @@ AppSwitcherXamlView::ItemView AppSwitcherXamlView::CreateItem()
             xamlDragOffsetY_ = logicalPoint.y - items_[itemIndex].layoutPosition.y;
             items_[itemIndex].pressed = true;
             items_[itemIndex].hovered = false;
-            ApplyItemInteractionState(items_[itemIndex]);
+            items_[itemIndex].ApplyInteractionState(palette_);
             sender.template as<winrt::Windows::UI::Xaml::UIElement>().CapturePointer(args.Pointer());
             args.Handled(true);
         });
@@ -1135,7 +822,7 @@ void AppSwitcherXamlView::EnsureItemCount(size_t count)
 {
     while (items_.size() < count)
     {
-        ItemView item = CreateItem();
+        AppSwitcherItemView item = CreateItem();
         if (!item.root)
         {
             break;
@@ -1270,12 +957,10 @@ void AppSwitcherXamlView::ApplyLayout(
             continue;
         }
 
-        item.root.Visibility(visible
-                                 ? winrt::Windows::UI::Xaml::Visibility::Visible
-                                 : winrt::Windows::UI::Xaml::Visibility::Collapsed);
+        item.SetRootVisibility(visible);
         if (!visible)
         {
-            ResetItem(item);
+            item.Reset(palette_);
             continue;
         }
 
@@ -1285,12 +970,7 @@ void AppSwitcherXamlView::ApplyLayout(
         const double w = static_cast<double>(RectWidth(rect)) / safeScale;
         const double h = static_cast<double>(RectHeight(rect)) / safeScale;
 
-        const HWND newHwnd = windows[i].hwnd;
-        if (item.hwnd != nullptr && item.hwnd != newHwnd)
-        {
-            ClearItemThumbnail(item);
-        }
-        item.hwnd = newHwnd;
+        item.AssignWindow(windows[i].hwnd);
         item.visible = true;
         item.layoutSize = {static_cast<float>(w), static_cast<float>(h)};
         if (!xamlPointerDragging_ || activeDragItemIndex_ != i)
@@ -1301,77 +981,14 @@ void AppSwitcherXamlView::ApplyLayout(
         }
         item.root.Width(w);
         item.root.Height(h);
+        item.ApplyTitle(windows[i].title, i + 1);
+        item.ApplyCloseButtonWidth(std::max(28.0, h * 0.18));
 
-        if (item.title)
-        {
-            if (!windows[i].title.empty())
-            {
-                item.title.Text(winrt::hstring{windows[i].title});
-            }
-            else
-            {
-                std::wstringstream title;
-                title << L"Window " << (i + 1);
-                item.title.Text(winrt::hstring{title.str()});
-            }
-        }
-
-        if (item.closeButton)
-        {
-            item.closeButton.Width(std::max(28.0, h * 0.18));
-        }
-
-        if (item.thumbnailHost)
-        {
-            item.root.UpdateLayout();
-            item.thumbnailHost.UpdateLayout();
-
-            const double thumbnailWidth = std::max(1.0, w);
-            const double thumbnailHeight = std::max(
-                1.0,
-                h * AppSwitcherLayoutEngine::ContentRowWeight / AppSwitcherLayoutEngine::TotalRowWeight);
-            ApplyContentClip(item.thumbnailHost, thumbnailWidth, thumbnailHeight);
-
-            const bool needsThumbnail = !item.thumbnailSlot || ShouldRecreateThumbnail(
-                                                                  *item.thumbnailSlot,
-                                                                  newHwnd,
-                                                                  thumbnailWidth,
-                                                                  thumbnailHeight,
-                                                                  currentDpiScale_);
-            if (needsThumbnail && !item.thumbnailFailed)
-            {
-                if (item.thumbnailSlot)
-                {
-                    ClearItemThumbnail(item);
-                }
-
-                auto slot = thumbnailManager_.CreateForWindow(
-                    newHwnd,
-                    item.thumbnailHost,
-                    thumbnailWidth,
-                    thumbnailHeight,
-                    currentDpiScale_);
-                if (slot)
-                {
-                    item.thumbnailSlot = std::make_unique<touchrev::thumbnail::PrivateThumbnailSlot>(std::move(slot));
-                    item.thumbnailError = S_OK;
-                    item.thumbnailFailed = false;
-                }
-                else
-                {
-                    item.thumbnailError = slot.lastError;
-                    item.thumbnailFailed = true;
-                    item.thumbnailSlot.reset();
-                }
-            }
-            else if (item.thumbnailSlot)
-            {
-                touchrev::thumbnail::PrivateThumbnailManager::ResizeSlot(
-                    *item.thumbnailSlot,
-                    thumbnailWidth,
-                    thumbnailHeight);
-            }
-        }
+        const double thumbnailWidth = std::max(1.0, w);
+        const double thumbnailHeight = std::max(
+            1.0,
+            h * AppSwitcherLayoutEngine::ContentRowWeight / AppSwitcherLayoutEngine::TotalRowWeight);
+        item.EnsureThumbnail(thumbnailManager_, thumbnailWidth, thumbnailHeight, currentDpiScale_);
     }
 
     if (emptyGrid_)

@@ -1,8 +1,8 @@
 #pragma once
 
-#include "AppSwitcherXamlView.h"
 #include "ThinXamlAppSwitcherHost.h"
 #include "ThemeManager.h"
+#include "appswitcher/AppSwitcherXamlView.h"
 #include "common/CoordinateSpace.h"
 #include "input/InputController.h"
 
@@ -41,10 +41,9 @@ private:
     void OnDpiChanged(WPARAM wParam, LPARAM lParam);
     void OnPaint();
     void RefreshTheme();
+    void SyncClientLayout(UINT width, UINT height, bool renderSwitcher);
+    void RebaseActiveDrag();
     void UpdateTransparentRegion();
-    void ActivateWindow(HWND targetHwnd);
-    bool CloseWindow(HWND targetHwnd);
-    void ExpandWindowAroundPoint(HWND targetHwnd, POINT centerPoint);
     void HandleInputResult(const InputController::Result& result);
     bool HandleKeyDown(WPARAM key);
     HMONITOR ResolveTargetMonitor() const;

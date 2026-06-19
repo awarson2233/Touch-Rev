@@ -8,14 +8,18 @@ option(TOUCHREV_BUILD_BLOCKER "Build TouchRev blocker hook and injector" OFF)
 
 add_executable(TouchRevGUI WIN32
     src/main.cpp
-    app.rc
+    TouchRevGUI.rc
     app.manifest
     src/ui/AppWindow.cpp
     src/ui/AppWindow.h
-    src/ui/AppSwitcherLayoutEngine.cpp
-    src/ui/AppSwitcherLayoutEngine.h
-    src/ui/AppSwitcherXamlView.cpp
-    src/ui/AppSwitcherXamlView.h
+    src/appswitcher/AppSwitcherItemView.cpp
+    src/appswitcher/AppSwitcherItemView.h
+    src/appswitcher/AppSwitcherLayoutEngine.cpp
+    src/appswitcher/AppSwitcherLayoutEngine.h
+    src/appswitcher/AppSwitcherWindowing.cpp
+    src/appswitcher/AppSwitcherWindowing.h
+    src/appswitcher/AppSwitcherXamlView.cpp
+    src/appswitcher/AppSwitcherXamlView.h
     src/ui/ThinXamlAppSwitcherHost.cpp
     src/ui/ThinXamlAppSwitcherHost.h
     src/ui/ThemeManager.cpp
@@ -122,8 +126,8 @@ endif()
 add_custom_target(copy_touchrev_xaml ALL
     COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:TouchRevGUI>/xaml"
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/xaml/AppSwitcherRoot.xaml"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/ui/xaml/SwitcherItem.xaml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/appswitcher/xaml/AppSwitcherRoot.xaml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/appswitcher/xaml/SwitcherItem.xaml"
         "$<TARGET_FILE_DIR:TouchRevGUI>/xaml"
 )
 add_dependencies(TouchRevGUI copy_touchrev_xaml)

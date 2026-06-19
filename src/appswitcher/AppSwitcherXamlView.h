@@ -1,10 +1,11 @@
 #pragma once
 
+#include "AppSwitcherItemView.h"
 #include "AppSwitcherLayoutEngine.h"
-#include "ThemeManager.h"
-#include "ThinXamlAppSwitcherHost.h"
 #include "common/CoordinateSpace.h"
 #include "thumbnail/PrivateThumbnailManager.h"
+#include "ui/ThemeManager.h"
+#include "ui/ThinXamlAppSwitcherHost.h"
 
 #ifdef GetCurrentTime
 #undef GetCurrentTime
@@ -32,7 +33,6 @@ public:
     PointDip DragPosition() const { return dragPosition_; }
     void SetDragPosition(PointDip position);
     void ApplyTheme(const AppSwitcherPalette& palette);
-    void SetTargetMonitor(HMONITOR monitor);
     void SetBoundsChangedCallback(std::function<void()> callback);
     void SetMissedInputCallback(std::function<void()> callback);
     void SetItemActivatedCallback(std::function<void(HWND)> callback);
@@ -44,32 +44,8 @@ public:
     bool ActivateSelectedItem();
 
 private:
-    struct ItemView
-    {
-        winrt::Windows::UI::Xaml::FrameworkElement root{nullptr};
-        winrt::Windows::UI::Xaml::Media::CompositeTransform transform{nullptr};
-        winrt::Windows::UI::Xaml::Controls::Grid layoutGrid{nullptr};
-        winrt::Windows::UI::Xaml::Controls::Border mainCard{nullptr};
-        winrt::Windows::UI::Xaml::Controls::Border titleBorder{nullptr};
-        winrt::Windows::UI::Xaml::Controls::TextBlock title{nullptr};
-        winrt::Windows::UI::Xaml::Controls::TextBlock defaultIcon{nullptr};
-        winrt::Windows::UI::Xaml::Controls::Button closeButton{nullptr};
-        winrt::Windows::UI::Xaml::Controls::Border thumbnailHost{nullptr};
-        winrt::Windows::UI::Xaml::Controls::Border pressOverlay{nullptr};
-        HWND hwnd = nullptr;
-        PointDip layoutPosition{};
-        SizeDip layoutSize{};
-        std::unique_ptr<touchrev::thumbnail::PrivateThumbnailSlot> thumbnailSlot;
-        HRESULT thumbnailError = S_OK;
-        bool thumbnailFailed = false;
-        bool visible = false;
-        bool hovered = false;
-        bool pressed = false;
-        bool grabbed = false;
-    };
-
     bool LoadRoot();
-    ItemView CreateItem();
+    AppSwitcherItemView CreateItem();
     void EnsureItemCount(size_t count);
     void ApplyLayout(const std::vector<AppSwitcherWindowItem>& windows, UINT widthPx, UINT heightPx, double scale);
     void AttachPointerHandlers();
@@ -78,22 +54,16 @@ private:
     void UpdateSelectionVisual();
     bool CanNavigateSelection() const;
     bool SetSelectedIndex(size_t index);
-    void ApplyItemTheme(ItemView& item);
-    void ApplyItemRowWeights(ItemView& item);
-    void ApplyItemInteractionState(ItemView& item);
     void ResetInteractionState();
     void BeginGrab(size_t itemIndex);
     void FinishPressedItem(size_t itemIndex, PointDip releasePoint);
     void HandleItemCloseRequested(size_t itemIndex);
     POINT DipPointToScreenPixel(PointDip point) const;
-    void ClearItemThumbnail(ItemView& item);
-    void ResetItem(ItemView& item);
 
     static std::wstring LoadTextFileUtf8(const std::wstring& path);
     static std::wstring ModuleRelativePath(const std::wstring& relativePath);
 
     HWND hwnd_ = nullptr;
-    HMONITOR targetMonitor_ = nullptr;
     ThinXamlAppSwitcherHost* host_ = nullptr;
     bool initialized_ = false;
 
@@ -104,7 +74,7 @@ private:
     winrt::Windows::UI::Xaml::FrameworkElement emptyGrid_{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock emptyIcon_{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock emptyText_{nullptr};
-    std::vector<ItemView> items_;
+    std::vector<AppSwitcherItemView> items_;
     PointDip dragPosition_{};
     PointDip contentOriginDip_{};
     PointDip visibleOriginDip_{};

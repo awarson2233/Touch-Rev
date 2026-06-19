@@ -1,5 +1,6 @@
 #include "AppWindow.h"
 
+#include "appswitcher/AppSwitcherWindowing.h"
 #include "common/Win32Error.h"
 
 #include <algorithm>
@@ -309,20 +310,19 @@ HRESULT AppWindow::OnCreate()
         return E_FAIL;
     }
 
-    appSwitcherXamlView_.SetTargetMonitor(targetMonitor_);
     appSwitcherXamlView_.SetMissedInputCallback([this]() {
         Hide();
     });
     appSwitcherXamlView_.SetItemActivatedCallback([this](HWND targetHwnd) {
-        ActivateWindow(targetHwnd);
+        touchrev::appswitcher::ActivateWindow(targetHwnd);
         Hide();
     });
     appSwitcherXamlView_.SetItemDragReleasedCallback([this](HWND targetHwnd, POINT releasePoint) {
-        ExpandWindowAroundPoint(targetHwnd, releasePoint);
+        touchrev::appswitcher::ExpandWindowAroundPoint(targetHwnd, releasePoint, targetWorkAreaPx_);
         Hide();
     });
-    appSwitcherXamlView_.SetItemCloseRequestedCallback([this](HWND targetHwnd) {
-        return CloseWindow(targetHwnd);
+    appSwitcherXamlView_.SetItemCloseRequestedCallback([](HWND targetHwnd) {
+        return touchrev::appswitcher::RequestCloseWindow(targetHwnd);
     });
 
     if (!appSwitcherXamlView_.Initialize(hwnd_, xamlHost_))
@@ -345,11 +345,8 @@ void AppWindow::OnDestroy()
 
 void AppWindow::OnSize(UINT width, UINT height)
 {
-    coordinates_.Update(dpi_, width, height);
-    xamlHost_.Resize(width, height);
-    appSwitcherXamlView_.Resize(width, height, coordinates_.Scale());
-    UpdateTransparentRegion();
-    inputController_.RebaseActiveDrag(hwnd_, appSwitcherXamlView_.DragPosition(), coordinates_);
+    SyncClientLayout(width, height, false);
+    RebaseActiveDrag();
 }
 
 void AppWindow::OnDpiChanged(WPARAM wParam, LPARAM lParam)
@@ -370,13 +367,8 @@ void AppWindow::OnDpiChanged(WPARAM wParam, LPARAM lParam)
             SWP_NOZORDER | SWP_NOACTIVATE);
     }
 
-    const UINT clientWidth = GetClientWidth(hwnd_);
-    const UINT clientHeight = GetClientHeight(hwnd_);
-    coordinates_.SetClientSize(clientWidth, clientHeight);
-    xamlHost_.Resize(clientWidth, clientHeight);
-    appSwitcherXamlView_.Resize(clientWidth, clientHeight, coordinates_.Scale());
-    UpdateTransparentRegion();
-    inputController_.RebaseActiveDrag(hwnd_, appSwitcherXamlView_.DragPosition(), coordinates_);
+    SyncClientLayout(GetClientWidth(hwnd_), GetClientHeight(hwnd_), false);
+    RebaseActiveDrag();
 }
 
 void AppWindow::OnPaint()
@@ -396,6 +388,26 @@ void AppWindow::RefreshTheme()
     UpdateTransparentRegion();
 }
 
+void AppWindow::SyncClientLayout(UINT width, UINT height, bool renderSwitcher)
+{
+    coordinates_.Update(dpi_, width, height);
+    xamlHost_.Resize(width, height);
+    if (renderSwitcher)
+    {
+        appSwitcherXamlView_.RenderSample(width, height, coordinates_.Scale());
+    }
+    else
+    {
+        appSwitcherXamlView_.Resize(width, height, coordinates_.Scale());
+    }
+    UpdateTransparentRegion();
+}
+
+void AppWindow::RebaseActiveDrag()
+{
+    inputController_.RebaseActiveDrag(hwnd_, appSwitcherXamlView_.DragPosition(), coordinates_);
+}
+
 void AppWindow::UpdateTransparentRegion()
 {
     if (!hwnd_)
@@ -403,9 +415,6 @@ void AppWindow::UpdateTransparentRegion()
         return;
     }
 
-    const UINT clientWidth = GetClientWidth(hwnd_);
-    const UINT clientHeight = GetClientHeight(hwnd_);
-    xamlHost_.Resize(clientWidth, clientHeight);
     SetWindowRgn(hwnd_, nullptr, TRUE);
 }
 
@@ -420,7 +429,6 @@ void AppWindow::ShowSwitcher()
     const MONITORINFO monitorInfo = LoadMonitorInfo(targetMonitor_);
     targetMonitorRectPx_ = monitorInfo.rcMonitor;
     targetWorkAreaPx_ = monitorInfo.rcWork;
-    appSwitcherXamlView_.SetTargetMonitor(targetMonitor_);
 
     const RECT windowRect = targetMonitorRectPx_;
     SetWindowPos(
@@ -433,12 +441,7 @@ void AppWindow::ShowSwitcher()
         SWP_SHOWWINDOW);
 
     dpi_ = static_cast<float>(GetDpiForWindow(hwnd_));
-    const UINT clientWidth = GetClientWidth(hwnd_);
-    const UINT clientHeight = GetClientHeight(hwnd_);
-    coordinates_.Update(dpi_, clientWidth, clientHeight);
-    xamlHost_.Resize(clientWidth, clientHeight);
-    appSwitcherXamlView_.RenderSample(clientWidth, clientHeight, coordinates_.Scale());
-    UpdateTransparentRegion();
+    SyncClientLayout(GetClientWidth(hwnd_), GetClientHeight(hwnd_), true);
     RefreshTheme();
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
@@ -478,95 +481,6 @@ void AppWindow::ExitApplication()
 
     isExiting_ = true;
     DestroyWindow(hwnd_);
-}
-
-void AppWindow::ActivateWindow(HWND targetHwnd)
-{
-    if (IsWindow(targetHwnd))
-    {
-        SetForegroundWindow(targetHwnd);
-    }
-}
-
-bool AppWindow::CloseWindow(HWND targetHwnd)
-{
-    if (!IsWindow(targetHwnd))
-    {
-        return false;
-    }
-
-    if (PostMessageW(targetHwnd, WM_CLOSE, 0, 0))
-    {
-        return true;
-    }
-
-    DebugLogHResult(L"PostMessageW(WM_CLOSE)", HResultFromLastError());
-    return false;
-}
-
-void AppWindow::ExpandWindowAroundPoint(HWND targetHwnd, POINT centerPoint)
-{
-    if (!IsWindow(targetHwnd))
-    {
-        return;
-    }
-
-    RECT currentRect{};
-    if (!GetWindowRect(targetHwnd, &currentRect))
-    {
-        ActivateWindow(targetHwnd);
-        return;
-    }
-
-    int width = std::max<int>(160, currentRect.right - currentRect.left);
-    int height = std::max<int>(120, currentRect.bottom - currentRect.top);
-
-    WINDOWPLACEMENT placement{};
-    placement.length = sizeof(placement);
-    if (GetWindowPlacement(targetHwnd, &placement))
-    {
-        const int normalWidth = placement.rcNormalPosition.right - placement.rcNormalPosition.left;
-        const int normalHeight = placement.rcNormalPosition.bottom - placement.rcNormalPosition.top;
-        if (normalWidth > 0 && normalHeight > 0)
-        {
-            width = std::max<int>(160, normalWidth);
-            height = std::max<int>(120, normalHeight);
-        }
-
-        if (placement.showCmd == SW_SHOWMAXIMIZED || placement.showCmd == SW_SHOWMINIMIZED)
-        {
-            ShowWindow(targetHwnd, SW_RESTORE);
-        }
-    }
-
-    MONITORINFO monitorInfo{};
-    monitorInfo.cbSize = sizeof(monitorInfo);
-    HMONITOR monitor = MonitorFromPoint(centerPoint, MONITOR_DEFAULTTONEAREST);
-    if (!monitor || !GetMonitorInfoW(monitor, &monitorInfo))
-    {
-        monitorInfo.rcWork = targetWorkAreaPx_;
-    }
-
-    const RECT workArea = monitorInfo.rcWork;
-    const int workWidth = std::max<int>(1, workArea.right - workArea.left);
-    const int workHeight = std::max<int>(1, workArea.bottom - workArea.top);
-    width = std::min(width, workWidth);
-    height = std::min(height, workHeight);
-
-    int left = centerPoint.x - width / 2;
-    int top = centerPoint.y - height / 2;
-    left = std::clamp<int>(left, static_cast<int>(workArea.left), static_cast<int>(workArea.right) - width);
-    top = std::clamp<int>(top, static_cast<int>(workArea.top), static_cast<int>(workArea.bottom) - height);
-
-    SetWindowPos(
-        targetHwnd,
-        HWND_TOP,
-        left,
-        top,
-        width,
-        height,
-        SWP_SHOWWINDOW);
-    ActivateWindow(targetHwnd);
 }
 
 void AppWindow::HandleInputResult(const InputController::Result& result)
