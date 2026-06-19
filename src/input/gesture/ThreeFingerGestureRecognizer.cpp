@@ -7,11 +7,10 @@
 
 namespace
 {
-constexpr double kMaxFingerDistance = 420.0;
-constexpr double kMaxDistanceSpreadRatio = 3.5;
+constexpr double kMaxFingerDistance = 4000.0;
 constexpr double kLongPressThresholdMs = 500.0;
-constexpr double kCandidateCancelMoveThreshold = 45.0;
-constexpr double kMoveDirectionThreshold = 80.0;
+constexpr double kTapMoveThreshold = 45.0;
+constexpr double kMoveEpsilon = 1.0;
 constexpr double kTapMaxDurationMs = 280.0;
 constexpr double kDoubleTapIntervalMs = 420.0;
 constexpr double kDoubleTapDistance = 120.0;
@@ -28,7 +27,7 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
     {
         if (state_ == State::Candidate)
         {
-            const Result result = FinishCandidateTap(lastCenter_, CalculateDistances(fingers));
+            const Result result = FinishCandidateTap(lastCenter_, {});
             state_ = State::Idle;
             hasCandidateIds_ = false;
             return result;
@@ -38,11 +37,10 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
         {
             state_ = State::Idle;
             hasCandidateIds_ = false;
-            lastMoveDirection_ = Direction::None;
-            return MakeResult(EventType::LongPressEnded, Direction::None, false, false, lastCenter_, {}, {});
+            return MakeResult(EventType::LongPressEnded, false, false, lastCenter_, {}, {}, fingers);
         }
 
-        return {};
+        return MakeResult(EventType::None, false, false, lastCenter_, {}, {}, fingers);
     }
 
     const Distances distances = CalculateDistances(fingers);
@@ -55,13 +53,12 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
         {
             state_ = State::Idle;
             hasCandidateIds_ = false;
-            lastMoveDirection_ = Direction::None;
-            return MakeResult(EventType::LongPressEnded, Direction::None, true, false, center, {}, distances);
+            return MakeResult(EventType::LongPressEnded, true, false, center, {}, distances, fingers);
         }
 
         state_ = State::Idle;
         hasCandidateIds_ = false;
-        return MakeResult(EventType::None, Direction::None, true, false, center, {}, distances);
+        return MakeResult(EventType::None, true, false, center, {}, distances, fingers);
     }
 
     if (state_ == State::Idle)
@@ -71,8 +68,7 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
         candidateStartQpc_ = now;
         candidateStartCenter_ = center;
         lastCenter_ = center;
-        lastMoveDirection_ = Direction::None;
-        return MakeResult(EventType::None, Direction::None, true, true, center, {}, distances);
+        return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
     }
 
     if (!MatchesCandidateIds(fingers))
@@ -82,57 +78,59 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
         candidateStartQpc_ = now;
         candidateStartCenter_ = center;
         lastCenter_ = center;
-        lastMoveDirection_ = Direction::None;
-        return MakeResult(EventType::None, Direction::None, true, true, center, {}, distances);
+        return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
     }
 
-    const Point deltaFromStart{center.x - candidateStartCenter_.x, center.y - candidateStartCenter_.y};
-    const double distanceFromStart = std::hypot(deltaFromStart.x, deltaFromStart.y);
+    Point deltaFromStart{};
+    if (!TryAverageDeltaById(candidateStartFingers_, fingers, deltaFromStart))
+    {
+        state_ = State::Candidate;
+        StoreCandidateIds(fingers);
+        candidateStartQpc_ = now;
+        candidateStartCenter_ = center;
+        lastCenter_ = center;
+        return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
+    }
 
     if (state_ == State::Candidate)
     {
-        if (distanceFromStart > kCandidateCancelMoveThreshold)
-        {
-            state_ = State::Idle;
-            hasCandidateIds_ = false;
-            return MakeResult(EventType::None, Direction::None, true, true, center, deltaFromStart, distances);
-        }
-
         if (CounterMs(now - candidateStartQpc_) >= kLongPressThresholdMs)
         {
             state_ = State::LongPressActive;
             lastCenter_ = center;
-            return MakeResult(EventType::LongPressStarted, Direction::None, true, true, center, deltaFromStart, distances);
+            return MakeResult(EventType::LongPressStarted, true, true, center, deltaFromStart, distances, fingers);
         }
 
         lastCenter_ = center;
-        return MakeResult(EventType::None, Direction::None, true, true, center, deltaFromStart, distances);
+        return MakeResult(EventType::None, true, true, center, deltaFromStart, distances, fingers);
     }
 
-    const Direction direction = ResolveDirection(deltaFromStart);
-    const EventType type = direction != Direction::None && direction != lastMoveDirection_
+    const Point deltaChange{deltaFromStart.x - lastDelta_.x, deltaFromStart.y - lastDelta_.y};
+    const EventType type = std::hypot(deltaChange.x, deltaChange.y) >= kMoveEpsilon
                                ? EventType::LongPressMoved
                                : EventType::LongPressHolding;
-    lastMoveDirection_ = direction != Direction::None ? direction : lastMoveDirection_;
     lastCenter_ = center;
-    return MakeResult(type, direction, true, true, center, deltaFromStart, distances);
+    return MakeResult(type, true, true, center, deltaFromStart, distances, fingers);
 }
 
 ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::Tick()
 {
     const std::int64_t now = CounterNow();
+    std::array<FingerPoint, 3> fingers{};
+    TryExtractThreeFingers(fingers);
+
     if (state_ == State::Candidate && lastThreeFingerActive_ && lastSameHand_)
     {
         if (CounterMs(now - candidateStartQpc_) >= kLongPressThresholdMs)
         {
             state_ = State::LongPressActive;
-            return MakeResult(EventType::LongPressStarted, Direction::None, true, true, lastCenter_, lastDelta_, lastDistances_);
+            return MakeResult(EventType::LongPressStarted, true, true, lastCenter_, lastDelta_, lastDistances_, fingers);
         }
     }
 
     if (state_ == State::LongPressActive && lastThreeFingerActive_ && lastSameHand_)
     {
-        return MakeResult(EventType::LongPressHolding, lastMoveDirection_, true, true, lastCenter_, lastDelta_, lastDistances_);
+        return MakeResult(EventType::LongPressHolding, true, true, lastCenter_, lastDelta_, lastDistances_, fingers);
     }
 
     return {};
@@ -142,9 +140,9 @@ void ThreeFingerGestureRecognizer::Reset()
 {
     state_ = State::Idle;
     candidateIds_ = {};
+    candidateStartFingers_ = {};
     hasCandidateIds_ = false;
-    activeFingers_ = {};
-    activeIds_ = {};
+    activeFingers_.clear();
     candidateStartQpc_ = 0;
     candidateStartCenter_ = {};
     lastCenter_ = {};
@@ -155,7 +153,6 @@ void ThreeFingerGestureRecognizer::Reset()
     hasFirstTap_ = false;
     firstTapQpc_ = 0;
     firstTapCenter_ = {};
-    lastMoveDirection_ = Direction::None;
 }
 
 std::int64_t ThreeFingerGestureRecognizer::CounterNow()
@@ -203,69 +200,85 @@ ThreeFingerGestureRecognizer::Distances ThreeFingerGestureRecognizer::CalculateD
 
 bool ThreeFingerGestureRecognizer::IsSameHand(const Distances& distances)
 {
-    return distances.max <= kMaxFingerDistance &&
-           distances.spreadRatio > 0.0 &&
-           distances.spreadRatio <= kMaxDistanceSpreadRatio;
+    return distances.max <= kMaxFingerDistance;
 }
 
-ThreeFingerGestureRecognizer::Direction ThreeFingerGestureRecognizer::ResolveDirection(Point delta)
+bool ThreeFingerGestureRecognizer::TryAverageDeltaById(
+    const std::array<FingerPoint, 3>& start,
+    const std::array<FingerPoint, 3>& current,
+    Point& delta)
 {
-    if (std::hypot(delta.x, delta.y) < kMoveDirectionThreshold)
+    Point sum{};
+    for (const FingerPoint& startFinger : start)
     {
-        return Direction::None;
-    }
-
-    if (std::abs(delta.x) > std::abs(delta.y))
-    {
-        return delta.x > 0.0 ? Direction::Right : Direction::Left;
-    }
-
-    return delta.y > 0.0 ? Direction::Down : Direction::Up;
-}
-
-void ThreeFingerGestureRecognizer::UpdateActiveSnapshot(const RawTouchInput::Frame& frame)
-{
-    for (const RawTouchInput::TouchPoint& point : frame.points)
-    {
-        if (point.contactId >= activeIds_.size())
-        {
-            continue;
-        }
-
-        if (!point.active || point.state == RawTouchInput::PointState::Released)
-        {
-            activeIds_[point.contactId] = false;
-            activeFingers_[point.contactId] = {};
-            continue;
-        }
-
-        activeIds_[point.contactId] = true;
-        activeFingers_[point.contactId] = FingerPoint{
-            .id = point.contactId,
-            .point = {static_cast<double>(point.x), static_cast<double>(point.y)},
-        };
-    }
-}
-
-bool ThreeFingerGestureRecognizer::TryExtractThreeFingers(std::array<FingerPoint, 3>& fingers) const
-{
-    size_t count = 0;
-    for (size_t id = 0; id < activeIds_.size(); ++id)
-    {
-        if (!activeIds_[id])
-        {
-            continue;
-        }
-
-        if (count >= fingers.size())
+        const auto currentFinger = std::find_if(current.begin(), current.end(), [id = startFinger.id](const FingerPoint& finger) {
+            return finger.id == id;
+        });
+        if (currentFinger == current.end())
         {
             return false;
         }
 
-        fingers[count++] = activeFingers_[id];
+        sum.x += currentFinger->point.x - startFinger.point.x;
+        sum.y += currentFinger->point.y - startFinger.point.y;
     }
 
-    return count == fingers.size();
+    delta = {sum.x / 3.0, sum.y / 3.0};
+    return true;
+}
+
+void ThreeFingerGestureRecognizer::UpdateActiveSnapshot(const RawTouchInput::Frame& frame)
+{
+    if (frame.frameSync && frame.contactCount == 0)
+    {
+        activeFingers_.clear();
+        return;
+    }
+
+    for (const RawTouchInput::TouchPoint& point : frame.points)
+    {
+        auto it = std::find_if(activeFingers_.begin(), activeFingers_.end(), [id = point.contactId](const FingerPoint& fp) {
+            return fp.id == id;
+        });
+
+        if (!point.active || point.state == RawTouchInput::PointState::Released)
+        {
+            if (it != activeFingers_.end())
+            {
+                activeFingers_.erase(it);
+            }
+        }
+        else
+        {
+            FingerPoint fp{
+                .id = point.contactId,
+                .point = {static_cast<double>(point.x), static_cast<double>(point.y)},
+            };
+            if (it != activeFingers_.end())
+            {
+                *it = fp;
+            }
+            else
+            {
+                activeFingers_.push_back(fp);
+            }
+        }
+    }
+
+    std::sort(activeFingers_.begin(), activeFingers_.end(), [](const FingerPoint& a, const FingerPoint& b) {
+        return a.id < b.id;
+    });
+}
+
+bool ThreeFingerGestureRecognizer::TryExtractThreeFingers(std::array<FingerPoint, 3>& fingers) const
+{
+    if (activeFingers_.size() != 3)
+    {
+        return false;
+    }
+
+    fingers = {activeFingers_[0], activeFingers_[1], activeFingers_[2]};
+    return true;
 }
 
 bool ThreeFingerGestureRecognizer::MatchesCandidateIds(const std::array<FingerPoint, 3>& fingers) const
@@ -285,17 +298,18 @@ bool ThreeFingerGestureRecognizer::MatchesCandidateIds(const std::array<FingerPo
 void ThreeFingerGestureRecognizer::StoreCandidateIds(const std::array<FingerPoint, 3>& fingers)
 {
     candidateIds_ = {fingers[0].id, fingers[1].id, fingers[2].id};
+    candidateStartFingers_ = fingers;
     hasCandidateIds_ = true;
 }
 
 ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::MakeResult(
     EventType type,
-    Direction direction,
     bool active,
     bool sameHand,
     Point center,
     Point delta,
-    Distances distances)
+    Distances distances,
+    const std::array<FingerPoint, 3>& fingers)
 {
     lastThreeFingerActive_ = active;
     lastSameHand_ = sameHand;
@@ -303,14 +317,22 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::MakeResult(
     lastDelta_ = delta;
     lastDistances_ = distances;
 
+    std::array<DWORD, 3> activeIds{};
+    if (active)
+    {
+        activeIds = {fingers[0].id, fingers[1].id, fingers[2].id};
+    }
+
     return Result{
         .type = type,
-        .direction = direction,
         .threeFingerActive = active,
         .sameHand = sameHand,
         .center = center,
         .delta = delta,
         .distances = distances,
+        .activeIds = activeIds,
+        .startIds = candidateIds_,
+        .deltaValid = hasCandidateIds_,
     };
 }
 
@@ -320,9 +342,12 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::FinishCandida
     const double durationMs = CounterMs(now - candidateStartQpc_);
     const double moveDistance = Distance(candidateStartCenter_, center);
 
-    if (durationMs > kTapMaxDurationMs || moveDistance > kCandidateCancelMoveThreshold)
+    std::array<FingerPoint, 3> fingers{};
+    TryExtractThreeFingers(fingers);
+
+    if (durationMs > kTapMaxDurationMs || moveDistance > kTapMoveThreshold)
     {
-        return MakeResult(EventType::None, Direction::None, false, true, center, {}, distances);
+        return MakeResult(EventType::None, false, true, center, {}, distances, fingers);
     }
 
     if (hasFirstTap_ &&
@@ -330,11 +355,11 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::FinishCandida
         Distance(firstTapCenter_, center) <= kDoubleTapDistance)
     {
         hasFirstTap_ = false;
-        return MakeResult(EventType::DoubleTap, Direction::None, false, true, center, {}, distances);
+        return MakeResult(EventType::DoubleTap, false, true, center, {}, distances, fingers);
     }
 
     hasFirstTap_ = true;
     firstTapQpc_ = now;
     firstTapCenter_ = center;
-    return MakeResult(EventType::None, Direction::None, false, true, center, {}, distances);
+    return MakeResult(EventType::None, false, true, center, {}, distances, fingers);
 }

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 class ThreeFingerGestureRecognizer
 {
@@ -16,15 +17,6 @@ public:
         LongPressMoved,
         LongPressEnded,
         DoubleTap,
-    };
-
-    enum class Direction
-    {
-        None,
-        Up,
-        Down,
-        Left,
-        Right,
     };
 
     struct Point
@@ -46,12 +38,14 @@ public:
     struct Result
     {
         EventType type = EventType::None;
-        Direction direction = Direction::None;
         bool threeFingerActive = false;
         bool sameHand = false;
         Point center{};
         Point delta{};
         Distances distances{};
+        std::array<DWORD, 3> activeIds{};
+        std::array<DWORD, 3> startIds{};
+        bool deltaValid = false;
     };
 
     Result ProcessFrame(const RawTouchInput::Frame& frame);
@@ -78,19 +72,19 @@ private:
     static Point Center(const std::array<FingerPoint, 3>& fingers);
     static Distances CalculateDistances(const std::array<FingerPoint, 3>& fingers);
     static bool IsSameHand(const Distances& distances);
-    static Direction ResolveDirection(Point delta);
+    static bool TryAverageDeltaById(const std::array<FingerPoint, 3>& start, const std::array<FingerPoint, 3>& current, Point& delta);
 
     void UpdateActiveSnapshot(const RawTouchInput::Frame& frame);
     bool TryExtractThreeFingers(std::array<FingerPoint, 3>& fingers) const;
     bool MatchesCandidateIds(const std::array<FingerPoint, 3>& fingers) const;
     void StoreCandidateIds(const std::array<FingerPoint, 3>& fingers);
-    Result MakeResult(EventType type, Direction direction, bool active, bool sameHand, Point center, Point delta, Distances distances);
+    Result MakeResult(EventType type, bool active, bool sameHand, Point center, Point delta, Distances distances, const std::array<FingerPoint, 3>& fingers);
     Result FinishCandidateTap(Point center, Distances distances);
 
     State state_ = State::Idle;
-    std::array<FingerPoint, 256> activeFingers_{};
-    std::array<bool, 256> activeIds_{};
+    std::vector<FingerPoint> activeFingers_;
     std::array<DWORD, 3> candidateIds_{};
+    std::array<FingerPoint, 3> candidateStartFingers_{};
     bool hasCandidateIds_ = false;
     std::int64_t candidateStartQpc_ = 0;
     Point candidateStartCenter_{};
@@ -103,6 +97,4 @@ private:
     bool hasFirstTap_ = false;
     std::int64_t firstTapQpc_ = 0;
     Point firstTapCenter_{};
-
-    Direction lastMoveDirection_ = Direction::None;
 };
