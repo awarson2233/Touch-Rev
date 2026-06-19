@@ -57,6 +57,16 @@ winrt::Windows::UI::Xaml::Media::Brush AcrylicBrush(const AppSwitcherPalette& pa
     }
 }
 }
+std::vector<ItemGeometry> MainView::GetItemGeometries() const
+{
+    std::vector<ItemGeometry> geometries;
+    geometries.reserve(cards_.size());
+    for (const auto& item : cards_)
+    {
+        geometries.push_back({item.layoutPosition, item.layoutSize, item.visible});
+    }
+    return geometries;
+}
 
 bool MainView::Initialize(HWND hwnd, ThinXamlAppSwitcherHost& host)
 {
@@ -143,22 +153,12 @@ bool MainView::HitTest(PointDip point) const
 
 RECT MainView::VisibleBoundsPx() const
 {
-    const double safeScale = std::max(0.01, currentDpiScale_);
-    return {
-        static_cast<LONG>(std::floor(static_cast<double>(visibleOriginDip_.x) * safeScale)),
-        static_cast<LONG>(std::floor(static_cast<double>(visibleOriginDip_.y) * safeScale)),
-        static_cast<LONG>(std::ceil(static_cast<double>(visibleOriginDip_.x + visibleBoundsDip_.width) * safeScale)),
-        static_cast<LONG>(std::ceil(static_cast<double>(visibleOriginDip_.y + visibleBoundsDip_.height) * safeScale))};
+    return touchrev::common::ScaleToPx(visibleOriginDip_, visibleBoundsDip_, currentDpiScale_);
 }
 
 RECT MainView::ContainerBoundsPx() const
 {
-    const double safeScale = std::max(0.01, currentDpiScale_);
-    return {
-        static_cast<LONG>(std::floor(static_cast<double>(contentOriginDip_.x) * safeScale)),
-        static_cast<LONG>(std::floor(static_cast<double>(contentOriginDip_.y) * safeScale)),
-        static_cast<LONG>(std::ceil(static_cast<double>(contentOriginDip_.x + contentBoundsDip_.width) * safeScale)),
-        static_cast<LONG>(std::ceil(static_cast<double>(contentOriginDip_.y + contentBoundsDip_.height) * safeScale))};
+    return touchrev::common::ScaleToPx(contentOriginDip_, contentBoundsDip_, currentDpiScale_);
 }
 
 void MainView::SetDragPosition(PointDip position)
@@ -221,14 +221,7 @@ bool MainView::MoveSelectionNext()
         return false;
     }
 
-    std::vector<ItemGeometry> geometries;
-    geometries.reserve(cards_.size());
-    for (const auto& item : cards_)
-    {
-        geometries.push_back({item.layoutPosition, item.layoutSize, item.visible});
-    }
-
-    const size_t nextIndex = LayoutEngine::GetNextVisibleIndex(geometries, selectedItemIndex_, true);
+    const size_t nextIndex = LayoutEngine::GetNextVisibleIndex(GetItemGeometries(), selectedItemIndex_, true);
     if (nextIndex != static_cast<size_t>(-1))
     {
         return SetSelectedIndex(nextIndex);
@@ -249,14 +242,7 @@ bool MainView::MoveSelectionPrevious()
         return false;
     }
 
-    std::vector<ItemGeometry> geometries;
-    geometries.reserve(cards_.size());
-    for (const auto& item : cards_)
-    {
-        geometries.push_back({item.layoutPosition, item.layoutSize, item.visible});
-    }
-
-    const size_t nextIndex = LayoutEngine::GetNextVisibleIndex(geometries, selectedItemIndex_, false);
+    const size_t nextIndex = LayoutEngine::GetNextVisibleIndex(GetItemGeometries(), selectedItemIndex_, false);
     if (nextIndex != static_cast<size_t>(-1))
     {
         return SetSelectedIndex(nextIndex);
@@ -278,15 +264,8 @@ bool MainView::MoveSelection(int stepX, int stepY)
         return false;
     }
 
-    std::vector<ItemGeometry> geometries;
-    geometries.reserve(cards_.size());
-    for (const auto& item : cards_)
-    {
-        geometries.push_back({item.layoutPosition, item.layoutSize, item.visible});
-    }
-
     const size_t nextIndex = LayoutEngine::CalculateNextSelection(
-        geometries,
+        GetItemGeometries(),
         selectedItemIndex_,
         stepX,
         stepY);
@@ -610,29 +589,6 @@ CardView MainView::CreateItem()
         args.Handled(true);
     };
 
-    callbacks.onPointerEntered = [this](size_t index) {
-        if (index < cards_.size())
-        {
-            cards_[index].hovered = true;
-            cards_[index].ApplyInteractionState(palette_);
-        }
-    };
-
-    callbacks.onPointerExited = [this](size_t index) {
-        if (index < cards_.size())
-        {
-            cards_[index].hovered = false;
-            cards_[index].ApplyInteractionState(palette_);
-        }
-    };
-
-    callbacks.onCloseButtonHoverChanged = [this](size_t index, bool isHovered) {
-        if (index < cards_.size())
-        {
-            cards_[index].ApplyCloseButtonHoverState(palette_, isHovered);
-        }
-    };
-
     auto itemOpt = CardView::Create(palette_, itemIndex, callbacks);
     if (!itemOpt)
     {
@@ -724,8 +680,6 @@ void MainView::ProcessItemReleased(winrt::Windows::UI::Xaml::Input::PointerRoute
     FinishPressedItem(itemIndexToFinish, releasePoint);
     args.Handled(true);
 }
-
-
 
 
 void MainView::EnsureItemCount(size_t count)
@@ -880,25 +834,17 @@ void MainView::ApplyLayout(
         const double w = static_cast<double>(touchrev::common::RectWidth(rect)) / safeScale;
         const double h = static_cast<double>(touchrev::common::RectHeight(rect)) / safeScale;
 
-        item.AssignWindow(windows[i].hwnd);
-        item.visible = true;
-        item.layoutSize = {static_cast<float>(w), static_cast<float>(h)};
-        if (!xamlPointerDragging_ || activeDragItemIndex_ != i)
-        {
-            item.layoutPosition = {
-                static_cast<float>(contentOriginDip_.x + x),
-                static_cast<float>(contentOriginDip_.y + y)};
-        }
-        item.root.Width(w);
-        item.root.Height(h);
-        item.ApplyTitle(windows[i].title, i + 1);
-        item.ApplyCloseButtonWidth(std::max(28.0, h * 0.18));
-
-        const double thumbnailWidth = std::max(1.0, w);
-        const double thumbnailHeight = std::max(
-            1.0,
-            h * LayoutEngine::ContentRowWeight / LayoutEngine::TotalRowWeight);
-        item.EnsureThumbnail(thumbnailManager_, thumbnailWidth, thumbnailHeight, currentDpiScale_);
+        item.UpdateState(
+            windows[i].hwnd,
+            windows[i].title,
+            i + 1,
+            contentOriginDip_.x + x,
+            contentOriginDip_.y + y,
+            w,
+            h,
+            xamlPointerDragging_ && activeDragItemIndex_ == i,
+            thumbnailManager_,
+            currentDpiScale_);
     }
 
     if (emptyGrid_)

@@ -32,10 +32,7 @@ winrt::Windows::UI::Xaml::Media::SolidColorBrush Brush(winrt::Windows::UI::Color
     return winrt::Windows::UI::Xaml::Media::SolidColorBrush(color);
 }
 
-winrt::Windows::UI::Color TransparentColor()
-{
-    return winrt::Windows::UI::Color{0x00, 0x00, 0x00, 0x00};
-}
+
 
 void ApplyContentClip(winrt::Windows::UI::Xaml::FrameworkElement const& element, double width, double height)
 {
@@ -110,19 +107,16 @@ bool CardView::Initialize(
 
         ApplyRowWeights();
         ApplyTheme(palette);
+        palette_ = palette;
 
-        root.PointerEntered([callbacks, index](auto const&, auto const&) {
-            if (callbacks.onPointerEntered)
-            {
-                callbacks.onPointerEntered(index);
-            }
+        root.PointerEntered([this](auto const&, auto const&) {
+            hovered = true;
+            ApplyInteractionState(palette_);
         });
 
-        root.PointerExited([callbacks, index](auto const&, auto const&) {
-            if (callbacks.onPointerExited)
-            {
-                callbacks.onPointerExited(index);
-            }
+        root.PointerExited([this](auto const&, auto const&) {
+            hovered = false;
+            ApplyInteractionState(palette_);
         });
 
 
@@ -134,17 +128,11 @@ bool CardView::Initialize(
                     callbacks.onCloseClicked(index);
                 }
             });
-            closeButton.PointerEntered([callbacks, index](auto const&, auto const&) {
-                if (callbacks.onCloseButtonHoverChanged)
-                {
-                    callbacks.onCloseButtonHoverChanged(index, true);
-                }
+            closeButton.PointerEntered([this](auto const&, auto const&) {
+                ApplyCloseButtonHoverState(palette_, true);
             });
-            closeButton.PointerExited([callbacks, index](auto const&, auto const&) {
-                if (callbacks.onCloseButtonHoverChanged)
-                {
-                    callbacks.onCloseButtonHoverChanged(index, false);
-                }
+            closeButton.PointerExited([this](auto const&, auto const&) {
+                ApplyCloseButtonHoverState(palette_, false);
             });
         }
 
@@ -207,6 +195,7 @@ void CardView::ApplyRowWeights()
 
 void CardView::ApplyTheme(const AppSwitcherPalette& palette)
 {
+    palette_ = palette;
     if (mainCard)
     {
         mainCard.Background(Brush(palette.cardBackground));
@@ -232,10 +221,10 @@ void CardView::ApplyTheme(const AppSwitcherPalette& palette)
     if (closeButton)
     {
         closeButton.Foreground(Brush(palette.buttonText));
-        closeButton.Background(Brush(TransparentColor()));
+        closeButton.Background(Brush(winrt::Windows::UI::Colors::Transparent()));
 
         auto resources = closeButton.Resources();
-        resources.Insert(winrt::box_value(L"ButtonBackground"), Brush(TransparentColor()));
+        resources.Insert(winrt::box_value(L"ButtonBackground"), Brush(winrt::Windows::UI::Colors::Transparent()));
         resources.Insert(winrt::box_value(L"ButtonForeground"), Brush(palette.buttonText));
         resources.Insert(winrt::box_value(L"ButtonBackgroundPointerOver"), Brush(palette.closeButtonHoverBackground));
         resources.Insert(winrt::box_value(L"ButtonForegroundPointerOver"), Brush(palette.closeButtonHoverText));
@@ -256,8 +245,8 @@ void CardView::ApplyInteractionState(const AppSwitcherPalette& palette)
         if (grabbed || pressed)
         {
             const auto overlayColor = grabbed
-                                          ? winrt::Windows::UI::Color{0x33, 0x00, 0x00, 0x00}
-                                          : winrt::Windows::UI::Color{0x22, 0x00, 0x00, 0x00};
+                                          ? palette.cardGrabbedOverlay
+                                          : palette.cardPressedOverlay;
             pressOverlay.Background(Brush(overlayColor));
             pressOverlay.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
         }
@@ -282,7 +271,7 @@ void CardView::ApplyCloseButtonHoverState(const AppSwitcherPalette& palette, boo
         return;
     }
 
-    closeButton.Background(Brush(isHovered ? palette.closeButtonHoverBackground : TransparentColor()));
+    closeButton.Background(Brush(isHovered ? palette.closeButtonHoverBackground : winrt::Windows::UI::Colors::Transparent()));
     closeButton.Foreground(Brush(isHovered ? palette.closeButtonHoverText : palette.buttonText));
 }
 
@@ -304,6 +293,7 @@ void CardView::ClearThumbnail()
 
 void CardView::Reset(const AppSwitcherPalette& palette)
 {
+    palette_ = palette;
     ClearThumbnail();
     hwnd = nullptr;
     layoutPosition = {};
@@ -313,6 +303,7 @@ void CardView::Reset(const AppSwitcherPalette& palette)
     pressed = false;
     grabbed = false;
     ApplyInteractionState(palette);
+    ApplyCloseButtonHoverState(palette, false);
 }
 
 void CardView::SetRootVisibility(bool isVisible)
@@ -431,6 +422,40 @@ void CardView::Destroy()
     closeButton = nullptr;
     thumbnailHost = nullptr;
     pressOverlay = nullptr;
+}
+
+void CardView::UpdateState(
+    HWND newHwnd,
+    const std::wstring& titleText,
+    size_t index,
+    double x,
+    double y,
+    double w,
+    double h,
+    bool isDragging,
+    touchrev::thumbnail::PrivateThumbnailManager& thumbnailManager,
+    double dpiScale)
+{
+    AssignWindow(newHwnd);
+    visible = true;
+    layoutSize = {static_cast<float>(w), static_cast<float>(h)};
+    if (!isDragging)
+    {
+        layoutPosition = {static_cast<float>(x), static_cast<float>(y)};
+    }
+    if (root)
+    {
+        root.Width(w);
+        root.Height(h);
+    }
+    ApplyTitle(titleText, index);
+    ApplyCloseButtonWidth(std::max(28.0, h * 0.18));
+
+    const double thumbnailWidth = std::max(1.0, w);
+    const double thumbnailHeight = std::max(
+        1.0,
+        h * LayoutEngine::ContentRowWeight / LayoutEngine::TotalRowWeight);
+    EnsureThumbnail(thumbnailManager, thumbnailWidth, thumbnailHeight, dpiScale);
 }
 }
 

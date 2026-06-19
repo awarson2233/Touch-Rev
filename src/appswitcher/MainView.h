@@ -46,6 +46,7 @@ public:
     bool ActivateSelectedItem();
 
 private:
+    std::vector<ItemGeometry> GetItemGeometries() const;
     bool LoadRoot();
     CardView CreateItem();
     void EnsureItemCount(size_t count);

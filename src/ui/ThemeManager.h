@@ -31,6 +31,8 @@ struct AppSwitcherPalette
     winrt::Windows::UI::Color closeButtonHoverText{};
     winrt::Windows::UI::Color focusBorder{};
     winrt::Windows::UI::Color focusFill{};
+    winrt::Windows::UI::Color cardGrabbedOverlay{};
+    winrt::Windows::UI::Color cardPressedOverlay{};
 };
 
 class ThemeManager

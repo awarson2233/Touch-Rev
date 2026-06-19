@@ -28,9 +28,6 @@ struct CardCallbacks
     std::function<void(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)> onPointerMoved;
     std::function<void(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)> onPointerReleased;
     std::function<void(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)> onPointerCanceled;
-    std::function<void(size_t index)> onPointerEntered;
-    std::function<void(size_t index)> onPointerExited;
-    std::function<void(size_t index, bool isHovered)> onCloseButtonHoverChanged;
 };
 
 
@@ -57,6 +54,7 @@ public:
     bool hovered = false;
     bool pressed = false;
     bool grabbed = false;
+    AppSwitcherPalette palette_{};
 
     static std::optional<CardView> Create(
         const AppSwitcherPalette& palette,
@@ -92,6 +90,17 @@ public:
         touchrev::thumbnail::PrivateThumbnailManager& thumbnailManager,
         double widthDip,
         double heightDip,
+        double dpiScale);
+    void UpdateState(
+        HWND newHwnd,
+        const std::wstring& titleText,
+        size_t index,
+        double x,
+        double y,
+        double w,
+        double h,
+        bool isDragging,
+        touchrev::thumbnail::PrivateThumbnailManager& thumbnailManager,
         double dpiScale);
 
 private:
