@@ -701,11 +701,7 @@ void MainView::UpdateVisibleBoundsAndPositions()
         std::max(1.0f, clientSizeDip_.width),
         std::max(1.0f, clientSizeDip_.height)};
 
-    if (root_)
-    {
-        root_.Width(visibleBoundsDip_.width);
-        root_.Height(visibleBoundsDip_.height);
-    }
+    // Let the root Grid automatically stretch to fill the host container instead of hardcoding DIP size.
 
     if (layoutCanvas_)
     {

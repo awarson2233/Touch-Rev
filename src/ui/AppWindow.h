@@ -72,4 +72,5 @@ private:
     ThemeManager themeManager_;
     ThinXamlAppSwitcherHost xamlHost_;
     touchrev::appswitcher::MainView appSwitcherMainView_;
+    bool isSyncingLayout_ = false;
 };

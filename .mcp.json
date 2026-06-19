@@ -3,6 +3,12 @@
     "ghidra": {
       "command": "C:/Users/Detach0-0/AppData/Local/GhidraMCP/.venv/Scripts/python.exe",
       "args": ["C:/Users/Detach0-0/AppData/Local/GhidraMCP/bridge_mcp_ghidra.py"]
+    },
+    "lldb": {
+      "command": "C:/Program Files/LLVM/bin/lldb-mcp.exe",
+      "env": {
+        "LLDB_EXE_PATH": "C:/Program Files/LLVM/bin/lldb.exe"
+      }
     }
   }
 }

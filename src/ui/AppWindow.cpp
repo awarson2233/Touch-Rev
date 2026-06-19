@@ -16,6 +16,24 @@ constexpr UINT kWmDwmCompositionChanged = WM_DWMCOMPOSITIONCHANGED;
 #else
 constexpr UINT kWmDwmCompositionChanged = 0x031E;
 #endif
+
+float GetMonitorDpi(HMONITOR monitor)
+{
+    UINT dpiX = 96;
+    UINT dpiY = 96;
+    HMODULE shcore = LoadLibraryW(L"shcore.dll");
+    if (shcore)
+    {
+        typedef HRESULT(WINAPI* GetDpiForMonitorProc)(HMONITOR, int, UINT*, UINT*);
+        auto getDpiForMonitor = reinterpret_cast<GetDpiForMonitorProc>(GetProcAddress(shcore, "GetDpiForMonitor"));
+        if (getDpiForMonitor)
+        {
+            getDpiForMonitor(monitor, 0, &dpiX, &dpiY);
+        }
+        FreeLibrary(shcore);
+    }
+    return static_cast<float>(dpiX);
+}
 }
 
 bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
@@ -49,7 +67,7 @@ bool AppWindow::Initialize(HINSTANCE instance, int showCommand)
     }
 
     constexpr DWORD style = WS_POPUP | WS_CLIPCHILDREN;
-    constexpr DWORD exStyle = WS_EX_TOOLWINDOW;
+    constexpr DWORD exStyle = WS_EX_TOOLWINDOW | WS_EX_TOPMOST;
     targetMonitor_ = ResolveTargetMonitor();
     const MONITORINFO monitorInfo = LoadMonitorInfo(targetMonitor_);
     targetMonitorRectPx_ = monitorInfo.rcMonitor;
@@ -141,6 +159,31 @@ LRESULT AppWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
     switch (message)
     {
+    case WM_WINDOWPOSCHANGING:
+    {
+        auto* pos = reinterpret_cast<WINDOWPOS*>(lParam);
+        const int targetWidth = targetMonitorRectPx_.right - targetMonitorRectPx_.left;
+        const int targetHeight = targetMonitorRectPx_.bottom - targetMonitorRectPx_.top;
+        if (targetWidth > 0 && targetHeight > 0)
+        {
+            pos->x = targetMonitorRectPx_.left;
+            pos->y = targetMonitorRectPx_.top;
+            pos->cx = targetWidth;
+            pos->cy = targetHeight;
+            pos->flags &= ~(SWP_NOMOVE | SWP_NOSIZE);
+        }
+        break; // 继续往下分发以允许其它必要处理，但大小坐标已被锁定
+    }
+
+    case WM_GETMINMAXINFO:
+    {
+        const auto minMaxInfo = reinterpret_cast<MINMAXINFO*>(lParam);
+        minMaxInfo->ptMaxTrackSize.x = 16384;
+        minMaxInfo->ptMaxTrackSize.y = 16384;
+        return 0;
+    }
+
+
     case WM_CREATE:
         return SUCCEEDED(OnCreate()) ? 0 : -1;
 
@@ -345,29 +388,69 @@ void AppWindow::OnDestroy()
 
 void AppWindow::OnSize(UINT width, UINT height)
 {
+    if (isSyncingLayout_)
+    {
+        return;
+    }
     SyncClientLayout(width, height, false);
     RebaseActiveDrag();
 }
 
 void AppWindow::OnDpiChanged(WPARAM wParam, LPARAM lParam)
 {
-    dpi_ = static_cast<float>(LOWORD(wParam));
+    const float newDpi = static_cast<float>(LOWORD(wParam));
+    
+    HMONITOR currentMonitor = ResolveTargetMonitor();
+    const float realMonitorDpi = GetMonitorDpi(currentMonitor);
+
+    // Filter out transient DPI messages that carry stale scaling factors during monitor transitions.
+    if (newDpi != realMonitorDpi)
+    {
+        return;
+    }
+
+    // Skip redundant layout cycles if we have already preset this DPI factor in ShowSwitcher.
+    if (newDpi == dpi_)
+    {
+        if (xamlHost_.ChildHwnd())
+        {
+            SendMessageW(xamlHost_.ChildHwnd(), WM_DPICHANGED, wParam, lParam);
+        }
+        return;
+    }
+
+    dpi_ = newDpi;
     coordinates_.SetDpi(dpi_);
+
+    if (xamlHost_.ChildHwnd())
+    {
+        SendMessageW(xamlHost_.ChildHwnd(), WM_DPICHANGED, wParam, lParam);
+    }
+
+    const bool wasSyncing = isSyncingLayout_;
+    isSyncingLayout_ = true;
 
     const auto suggestedRect = reinterpret_cast<RECT*>(lParam);
     if (suggestedRect)
     {
         SetWindowPos(
             hwnd_,
-            nullptr,
+            HWND_TOPMOST,
             suggestedRect->left,
             suggestedRect->top,
             suggestedRect->right - suggestedRect->left,
             suggestedRect->bottom - suggestedRect->top,
-            SWP_NOZORDER | SWP_NOACTIVATE);
+            SWP_NOACTIVATE);
+        const int width = suggestedRect->right - suggestedRect->left;
+        const int height = suggestedRect->bottom - suggestedRect->top;
+        SyncClientLayout(width, height, false);
+    }
+    else
+    {
+        SyncClientLayout(GetClientWidth(hwnd_), GetClientHeight(hwnd_), false);
     }
 
-    SyncClientLayout(GetClientWidth(hwnd_), GetClientHeight(hwnd_), false);
+    isSyncingLayout_ = wasSyncing;
     RebaseActiveDrag();
 }
 
@@ -425,27 +508,41 @@ void AppWindow::ShowSwitcher()
         return;
     }
 
+    isSyncingLayout_ = true;
+
     targetMonitor_ = ResolveTargetMonitor();
     const MONITORINFO monitorInfo = LoadMonitorInfo(targetMonitor_);
     targetMonitorRectPx_ = monitorInfo.rcMonitor;
     targetWorkAreaPx_ = monitorInfo.rcWork;
 
+    dpi_ = GetMonitorDpi(targetMonitor_);
     const RECT windowRect = targetMonitorRectPx_;
     SetWindowPos(
         hwnd_,
-        HWND_TOP,
+        HWND_TOPMOST,
         windowRect.left,
         windowRect.top,
         windowRect.right - windowRect.left,
         windowRect.bottom - windowRect.top,
-        SWP_SHOWWINDOW);
+        SWP_NOACTIVATE);
 
-    dpi_ = static_cast<float>(GetDpiForWindow(hwnd_));
-    SyncClientLayout(GetClientWidth(hwnd_), GetClientHeight(hwnd_), true);
+    const int width = windowRect.right - windowRect.left;
+    const int height = windowRect.bottom - windowRect.top;
+
+    if (xamlHost_.ChildHwnd())
+    {
+        const WPARAM wp = MAKEWPARAM(static_cast<WORD>(dpi_), static_cast<WORD>(dpi_));
+        RECT childSuggestedRect{0, 0, width, height};
+        SendMessageW(xamlHost_.ChildHwnd(), WM_DPICHANGED, wp, reinterpret_cast<LPARAM>(&childSuggestedRect));
+    }
+
+    SyncClientLayout(width, height, true);
     RefreshTheme();
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
     isVisible_ = true;
+
+    isSyncingLayout_ = false;
 }
 
 void AppWindow::Hide()

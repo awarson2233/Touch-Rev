@@ -7,13 +7,15 @@
 
 namespace
 {
-constexpr double kMaxFingerDistance = 4000.0;
-constexpr double kLongPressThresholdMs = 500.0;
-constexpr double kTapMoveThreshold = 45.0;
-constexpr double kMoveEpsilon = 1.0;
-constexpr double kTapMaxDurationMs = 280.0;
-constexpr double kDoubleTapIntervalMs = 420.0;
-constexpr double kDoubleTapDistance = 120.0;
+constexpr double kMaxFingerDistance = 600.0;
+constexpr double kLongPressThresholdMs = 400.0;
+constexpr double kTapMoveThreshold = 30.0;
+constexpr double kMoveEpsilon = 0.1;
+constexpr double kTapMaxDurationMs = 400.0;
+constexpr double kMinDoubleTapIntervalMs = 100.0;
+constexpr double kDoubleTapIntervalMs = 450.0;
+constexpr double kDoubleTapDistance = 150.0;
+constexpr double kMaxStartMovement = 40.0;
 }
 
 ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(const RawTouchInput::Frame& frame)
@@ -27,7 +29,7 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
     {
         if (state_ == State::Candidate)
         {
-            const Result result = FinishCandidateTap(lastCenter_, {});
+            const Result result = FinishCandidateTap(lastCenter_, lastDistances_, lastFingers_);
             state_ = State::Idle;
             hasCandidateIds_ = false;
             return result;
@@ -40,11 +42,14 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
             return MakeResult(EventType::LongPressEnded, false, false, lastCenter_, {}, {}, fingers);
         }
 
+        state_ = State::Idle;
+        hasCandidateIds_ = false;
         return MakeResult(EventType::None, false, false, lastCenter_, {}, {}, fingers);
     }
 
     const Distances distances = CalculateDistances(fingers);
     const bool sameHand = IsSameHand(distances);
+    lastFingers_ = fingers;
     const Point center = Center(fingers);
 
     if (!sameHand)
@@ -92,25 +97,53 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
         return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
     }
 
+    if (state_ == State::Tracking)
+    {
+        lastCenter_ = center;
+        return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
+    }
+
     if (state_ == State::Candidate)
     {
+        const double distFromAnchor = Distance(candidateStartCenter_, center);
+        if (distFromAnchor > kMaxStartMovement * 2.4)
+        {
+            state_ = State::Tracking;
+            lastCenter_ = center;
+            return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
+        }
+
         if (CounterMs(now - candidateStartQpc_) >= kLongPressThresholdMs)
         {
-            state_ = State::LongPressActive;
-            lastCenter_ = center;
-            return MakeResult(EventType::LongPressStarted, true, true, center, deltaFromStart, distances, fingers);
+            if (distFromAnchor <= kMaxStartMovement * 1.5)
+            {
+                state_ = State::LongPressActive;
+                lastCenter_ = center;
+                return MakeResult(EventType::LongPressStarted, true, true, center, {0.0, 0.0}, distances, fingers);
+            }
+            else
+            {
+                state_ = State::Tracking;
+                lastCenter_ = center;
+                return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
+            }
         }
 
         lastCenter_ = center;
-        return MakeResult(EventType::None, true, true, center, deltaFromStart, distances, fingers);
+        return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
     }
 
-    const Point deltaChange{deltaFromStart.x - lastDelta_.x, deltaFromStart.y - lastDelta_.y};
-    const EventType type = std::hypot(deltaChange.x, deltaChange.y) >= kMoveEpsilon
-                               ? EventType::LongPressMoved
-                               : EventType::LongPressHolding;
-    lastCenter_ = center;
-    return MakeResult(type, true, true, center, deltaFromStart, distances, fingers);
+    if (state_ == State::LongPressActive)
+    {
+        const Point frameDelta{center.x - lastCenter_.x, center.y - lastCenter_.y};
+        const EventType type = std::hypot(frameDelta.x, frameDelta.y) >= kMoveEpsilon
+                                   ? EventType::LongPressMoved
+                                   : EventType::LongPressHolding;
+        lastCenter_ = center;
+        return MakeResult(type, true, true, center, frameDelta, distances, fingers);
+    }
+
+    return {};
 }
 
 ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::Tick()
@@ -121,16 +154,28 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::Tick()
 
     if (state_ == State::Candidate && lastThreeFingerActive_ && lastSameHand_)
     {
-        if (CounterMs(now - candidateStartQpc_) >= kLongPressThresholdMs)
+        const double distFromAnchor = Distance(candidateStartCenter_, lastCenter_);
+        if (distFromAnchor > kMaxStartMovement * 2.4)
         {
-            state_ = State::LongPressActive;
-            return MakeResult(EventType::LongPressStarted, true, true, lastCenter_, lastDelta_, lastDistances_, fingers);
+            state_ = State::Tracking;
+        }
+        else if (CounterMs(now - candidateStartQpc_) >= kLongPressThresholdMs)
+        {
+            if (distFromAnchor <= kMaxStartMovement * 1.5)
+            {
+                state_ = State::LongPressActive;
+                return MakeResult(EventType::LongPressStarted, true, true, lastCenter_, {0.0, 0.0}, lastDistances_, fingers);
+            }
+            else
+            {
+                state_ = State::Tracking;
+            }
         }
     }
 
     if (state_ == State::LongPressActive && lastThreeFingerActive_ && lastSameHand_)
     {
-        return MakeResult(EventType::LongPressHolding, true, true, lastCenter_, lastDelta_, lastDistances_, fingers);
+        return MakeResult(EventType::LongPressHolding, true, true, lastCenter_, {0.0, 0.0}, lastDistances_, fingers);
     }
 
     return {};
@@ -148,6 +193,7 @@ void ThreeFingerGestureRecognizer::Reset()
     lastCenter_ = {};
     lastDelta_ = {};
     lastDistances_ = {};
+    lastFingers_ = {};
     lastThreeFingerActive_ = false;
     lastSameHand_ = false;
     hasFirstTap_ = false;
@@ -252,7 +298,7 @@ void ThreeFingerGestureRecognizer::UpdateActiveSnapshot(const RawTouchInput::Fra
         {
             FingerPoint fp{
                 .id = point.contactId,
-                .point = {static_cast<double>(point.x), static_cast<double>(point.y)},
+                .point = {static_cast<double>(point.x) * 0.1, static_cast<double>(point.y) * 0.1},
             };
             if (it != activeFingers_.end())
             {
@@ -336,26 +382,35 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::MakeResult(
     };
 }
 
-ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::FinishCandidateTap(Point center, Distances distances)
+ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::FinishCandidateTap(
+    Point center,
+    Distances distances,
+    const std::array<FingerPoint, 3>& fingers)
 {
     const std::int64_t now = CounterNow();
     const double durationMs = CounterMs(now - candidateStartQpc_);
     const double moveDistance = Distance(candidateStartCenter_, center);
-
-    std::array<FingerPoint, 3> fingers{};
-    TryExtractThreeFingers(fingers);
 
     if (durationMs > kTapMaxDurationMs || moveDistance > kTapMoveThreshold)
     {
         return MakeResult(EventType::None, false, true, center, {}, distances, fingers);
     }
 
-    if (hasFirstTap_ &&
-        CounterMs(now - firstTapQpc_) <= kDoubleTapIntervalMs &&
-        Distance(firstTapCenter_, center) <= kDoubleTapDistance)
+    if (hasFirstTap_)
     {
-        hasFirstTap_ = false;
-        return MakeResult(EventType::DoubleTap, false, true, center, {}, distances, fingers);
+        const double elapsedMs = CounterMs(now - firstTapQpc_);
+        if (elapsedMs < kMinDoubleTapIntervalMs)
+        {
+            // 时间间隔过短，视为硬件抖动噪声，直接忽略，不触发双击且不重置第一击状态
+            return MakeResult(EventType::None, false, true, center, {}, distances, fingers);
+        }
+
+        if (elapsedMs <= kDoubleTapIntervalMs &&
+            Distance(firstTapCenter_, center) <= kDoubleTapDistance)
+        {
+            hasFirstTap_ = false;
+            return MakeResult(EventType::DoubleTap, false, true, center, {}, distances, fingers);
+        }
     }
 
     hasFirstTap_ = true;

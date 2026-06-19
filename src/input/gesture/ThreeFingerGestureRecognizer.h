@@ -57,6 +57,7 @@ private:
     {
         Idle,
         Candidate,
+        Tracking,
         LongPressActive,
     };
 
@@ -79,7 +80,7 @@ private:
     bool MatchesCandidateIds(const std::array<FingerPoint, 3>& fingers) const;
     void StoreCandidateIds(const std::array<FingerPoint, 3>& fingers);
     Result MakeResult(EventType type, bool active, bool sameHand, Point center, Point delta, Distances distances, const std::array<FingerPoint, 3>& fingers);
-    Result FinishCandidateTap(Point center, Distances distances);
+    Result FinishCandidateTap(Point center, Distances distances, const std::array<FingerPoint, 3>& fingers);
 
     State state_ = State::Idle;
     std::vector<FingerPoint> activeFingers_;
@@ -91,6 +92,7 @@ private:
     Point lastCenter_{};
     Point lastDelta_{};
     Distances lastDistances_{};
+    std::array<FingerPoint, 3> lastFingers_{};
     bool lastThreeFingerActive_ = false;
     bool lastSameHand_ = false;
 
