@@ -2,6 +2,7 @@
 
 #include "appswitcher/WindowController.h"
 #include "common/Win32Error.h"
+#include "common/AppSettings.h"
 
 #include <algorithm>
 #include <vector>
@@ -143,14 +144,26 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         switch (static_cast<ActivationCommand>(wParam))
         {
         case ActivationCommand::Show:
-            ShowSwitcher();
+        case ActivationCommand::Toggle:
+        {
+            HWND configHwnd = FindWindowW(L"TouchRevGUI.ConfigWindow", nullptr);
+            if (configHwnd)
+            {
+                ShowWindow(configHwnd, SW_SHOW);
+                SetForegroundWindow(configHwnd);
+            }
             return 0;
+        }
         case ActivationCommand::Hide:
+        {
+            HWND configHwnd = FindWindowW(L"TouchRevGUI.ConfigWindow", nullptr);
+            if (configHwnd)
+            {
+                ShowWindow(configHwnd, SW_HIDE);
+            }
             Hide();
             return 0;
-        case ActivationCommand::Toggle:
-            ToggleSwitcher();
-            return 0;
+        }
         case ActivationCommand::Exit:
             ExitApplication();
             return 0;
@@ -224,17 +237,28 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
     case WM_INPUT:
     {
+        if (!touchrev::settings::g_IsGestureEnabled)
+        {
+            return 0;
+        }
+
         const InputController::RawInputResult inputResult = inputController_.OnRawInput(lParam);
         if (inputResult.action == InputController::InputAction::ShowSwitcher)
         {
-            ShowSwitcher();
+            if (touchrev::settings::g_IsSwitcherWindowEnabled)
+            {
+                ShowSwitcher();
+            }
         }
         else if (inputResult.action == InputController::InputAction::LongPressBegin)
         {
-            ShowSwitcher();
-            isLongPressNavigating_ = true;
-            pendingLongPressActivation_ = false;
-            appSwitcherMainView_.ClearGestureAccumulator();
+            if (touchrev::settings::g_IsSwitcherWindowEnabled)
+            {
+                ShowSwitcher();
+                isLongPressNavigating_ = true;
+                pendingLongPressActivation_ = false;
+                appSwitcherMainView_.ClearGestureAccumulator();
+            }
         }
         else if (inputResult.action == InputController::InputAction::LongPressMove)
         {
@@ -414,6 +438,13 @@ void MainWindow::OnDestroy()
 {
     appSwitcherMainView_.Shutdown();
     xamlHost_.Shutdown();
+
+    HWND configHwnd = FindWindowW(L"TouchRevGUI.ConfigWindow", nullptr);
+    if (configHwnd)
+    {
+        DestroyWindow(configHwnd);
+    }
+
     PostQuitMessage(0);
 }
 

@@ -309,6 +309,58 @@ size_t LayoutEngine::GetNextVisibleIndex(
     }
     return static_cast<size_t>(-1);
 }
+
+size_t LayoutEngine::FindColumnExtreme(
+    const std::vector<ItemGeometry>& items,
+    size_t currentIndex,
+    bool findMaxY)
+{
+    if (currentIndex == static_cast<size_t>(-1) || currentIndex >= items.size())
+    {
+        return static_cast<size_t>(-1);
+    }
+
+    const auto& current = items[currentIndex];
+    const double currentCenterX = current.position.x + current.size.width * 0.5;
+    
+    size_t bestIndex = currentIndex;
+    double extremeY = current.position.y;
+
+    for (size_t i = 0; i < items.size(); ++i)
+    {
+        if (i == currentIndex || !items[i].visible)
+        {
+            continue;
+        }
+
+        const auto& candidate = items[i];
+        const double candidateCenterX = candidate.position.x + candidate.size.width * 0.5;
+        const double dx = candidateCenterX - currentCenterX;
+
+        // 如果在水平方向上有重合，则视为同一列
+        if (std::abs(dx) < candidate.size.width)
+        {
+            if (findMaxY)
+            {
+                if (candidate.position.y > extremeY)
+                {
+                    extremeY = candidate.position.y;
+                    bestIndex = i;
+                }
+            }
+            else
+            {
+                if (candidate.position.y < extremeY)
+                {
+                    extremeY = candidate.position.y;
+                    bestIndex = i;
+                }
+            }
+        }
+    }
+
+    return bestIndex;
+}
 }
 
 

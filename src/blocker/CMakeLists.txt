@@ -29,18 +29,28 @@ endif()
 include(FetchContent)
 
 set(TOUCHREV_DETOURS_SOURCE "" CACHE PATH "Optional path to a local Microsoft Detours source checkout")
+set(TOUCHREV_DETOURS_UPDATE_DISCONNECTED ON CACHE BOOL "Skip Detours git update checks after the initial fetch")
 
 if(TOUCHREV_DETOURS_SOURCE)
     set(detours_SOURCE_DIR "${TOUCHREV_DETOURS_SOURCE}")
 else()
+    set(FETCHCONTENT_UPDATES_DISCONNECTED_DETOURS ${TOUCHREV_DETOURS_UPDATE_DISCONNECTED})
     FetchContent_Declare(
         detours
         GIT_REPOSITORY https://github.com/microsoft/Detours.git
         GIT_TAG main
+        GIT_SHALLOW TRUE
+        GIT_PROGRESS FALSE
+        UPDATE_DISCONNECTED ${TOUCHREV_DETOURS_UPDATE_DISCONNECTED}
     )
     FetchContent_GetProperties(detours)
     if(NOT detours_POPULATED)
+        cmake_policy(PUSH)
+        if(POLICY CMP0169)
+            cmake_policy(SET CMP0169 OLD)
+        endif()
         FetchContent_Populate(detours)
+        cmake_policy(POP)
     endif()
 endif()
 
@@ -57,11 +67,11 @@ set(DETOURS_SOURCES
     "${DETOURS_SRC_DIR}/modules.cpp"
 )
 
-foreach(detours_disasm IN ITEMS disolarm.cpp disolarm64.cpp disolia64.cpp disolx64.cpp disolx86.cpp)
-    if(EXISTS "${DETOURS_SRC_DIR}/${detours_disasm}")
-        list(APPEND DETOURS_SOURCES "${DETOURS_SRC_DIR}/${detours_disasm}")
-    endif()
-endforeach()
+if(TOUCHREV_BLOCKER_PLATFORM_UPPER STREQUAL "ARM64")
+    list(APPEND DETOURS_SOURCES "${DETOURS_SRC_DIR}/disolarm64.cpp")
+elseif(TOUCHREV_BLOCKER_PLATFORM_UPPER STREQUAL "X64")
+    list(APPEND DETOURS_SOURCES "${DETOURS_SRC_DIR}/disolx64.cpp")
+endif()
 
 add_library(touchrev_blocker_detours STATIC ${DETOURS_SOURCES})
 target_include_directories(touchrev_blocker_detours PUBLIC "${DETOURS_SRC_DIR}")
@@ -107,3 +117,8 @@ set_target_properties(TouchRevBlockerHook TouchRevBlockerInjector PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:TouchRevGUI>"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/blocker"
 )
+
+target_compile_features(touchrev_blocker_common PRIVATE cxx_std_20)
+target_compile_features(TouchRevBlockerHook PRIVATE cxx_std_20)
+target_compile_features(TouchRevBlockerInjector PRIVATE cxx_std_20)
+

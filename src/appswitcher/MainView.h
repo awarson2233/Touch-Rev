@@ -41,7 +41,7 @@ public:
     void SetItemActivatedCallback(std::function<void(HWND)> callback);
     void SetItemDragReleasedCallback(std::function<void(HWND, POINT)> callback);
     void SetItemCloseRequestedCallback(std::function<bool(HWND)> callback);
-    bool MoveSelection(int stepX, int stepY);
+    bool MoveSelection(int stepX, int stepY, bool allowWrap = true);
     bool MoveSelectionNext();
     bool MoveSelectionPrevious();
     bool ActivateSelectedItem();

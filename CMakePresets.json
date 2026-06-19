@@ -7,32 +7,82 @@
   },
   "configurePresets": [
     {
-      "name": "ninja-debug",
-      "displayName": "Ninja Debug",
-      "generator": "Ninja",
+      "name": "arm64-base",
+      "hidden": true,
+      "generator": "Visual Studio 18 2026",
+      "architecture": "arm64",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug"
+        "TOUCHREV_BUILD_BLOCKER": "ON",
+        "TOUCHREV_BUILD_TOOLS": "OFF",
+        "TOUCHREV_DETOURS_UPDATE_DISCONNECTED": "ON"
       }
     },
     {
-      "name": "ninja-release",
-      "displayName": "Ninja Release",
-      "generator": "Ninja",
+      "name": "arm64-debug",
+      "displayName": "ARM64 Debug",
+      "inherits": "arm64-base"
+    },
+    {
+      "name": "arm64-release",
+      "displayName": "ARM64 Release",
+      "inherits": "arm64-base"
+    },
+    {
+      "name": "x64-base",
+      "hidden": true,
+      "generator": "Visual Studio 18 2026",
+      "architecture": "x64",
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release"
+        "TOUCHREV_BUILD_BLOCKER": "ON",
+        "TOUCHREV_BUILD_TOOLS": "OFF",
+        "TOUCHREV_DETOURS_UPDATE_DISCONNECTED": "ON"
       }
+    },
+    {
+      "name": "x64-debug",
+      "displayName": "x64 Debug",
+      "inherits": "x64-base"
+    },
+    {
+      "name": "x64-release",
+      "displayName": "x64 Release",
+      "inherits": "x64-base"
     }
   ],
   "buildPresets": [
     {
-      "name": "ninja-debug",
-      "configurePreset": "ninja-debug"
+      "name": "arm64-debug",
+      "configurePreset": "arm64-debug",
+      "configuration": "Debug",
+      "targets": [
+        "ALL_BUILD"
+      ]
     },
     {
-      "name": "ninja-release",
-      "configurePreset": "ninja-release"
+      "name": "arm64-release",
+      "configurePreset": "arm64-release",
+      "configuration": "Release",
+      "targets": [
+        "ALL_BUILD"
+      ]
+    },
+    {
+      "name": "x64-debug",
+      "configurePreset": "x64-debug",
+      "configuration": "Debug",
+      "targets": [
+        "ALL_BUILD"
+      ]
+    },
+    {
+      "name": "x64-release",
+      "configurePreset": "x64-release",
+      "configuration": "Release",
+      "targets": [
+        "ALL_BUILD"
+      ]
     }
   ]
 }

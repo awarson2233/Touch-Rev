@@ -53,6 +53,11 @@ public:
         size_t currentIndex,
         bool forward);
 
+    static size_t FindColumnExtreme(
+        const std::vector<ItemGeometry>& items,
+        size_t currentIndex,
+        bool findMaxY);
+
 
     static constexpr double ItemGapDip = 32.0;
     static constexpr double PaddingDip = 48.0;

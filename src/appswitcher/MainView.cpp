@@ -251,7 +251,7 @@ bool MainView::MoveSelectionPrevious()
 }
 
 
-bool MainView::MoveSelection(int stepX, int stepY)
+bool MainView::MoveSelection(int stepX, int stepY, bool allowWrap)
 {
     if (!CanNavigateSelection() || (stepX == 0 && stepY == 0))
     {
@@ -275,6 +275,11 @@ bool MainView::MoveSelection(int stepX, int stepY)
         return SetSelectedIndex(nextIndex);
     }
 
+    if (!allowWrap)
+    {
+        return false;
+    }
+
     if (stepX > 0)
     {
         return MoveSelectionNext();
@@ -282,6 +287,24 @@ bool MainView::MoveSelection(int stepX, int stepY)
     if (stepX < 0)
     {
         return MoveSelectionPrevious();
+    }
+    if (stepY > 0)
+    {
+        // 向下撞墙，环绕至同一列最上方
+        const size_t wrapIndex = LayoutEngine::FindColumnExtreme(GetItemGeometries(), selectedItemIndex_, false);
+        if (wrapIndex != static_cast<size_t>(-1) && wrapIndex != selectedItemIndex_)
+        {
+            return SetSelectedIndex(wrapIndex);
+        }
+    }
+    if (stepY < 0)
+    {
+        // 向上撞墙，环绕至同一列最下方
+        const size_t wrapIndex = LayoutEngine::FindColumnExtreme(GetItemGeometries(), selectedItemIndex_, true);
+        if (wrapIndex != static_cast<size_t>(-1) && wrapIndex != selectedItemIndex_)
+        {
+            return SetSelectedIndex(wrapIndex);
+        }
     }
     return false;
 }
@@ -891,7 +914,7 @@ bool MainView::AccumulateAndMoveSelection(double deltaX, double deltaY)
         int steps = static_cast<int>(gestureAccX_ / currentSnapThresholdX);
         if (steps != 0)
         {
-            if (MoveSelection(steps, 0))
+            if (MoveSelection(steps, 0, false))
             {
                 selectedChanged = true;
             }
@@ -904,7 +927,7 @@ bool MainView::AccumulateAndMoveSelection(double deltaX, double deltaY)
         int steps = static_cast<int>(gestureAccY_ / currentSnapThresholdY);
         if (steps != 0)
         {
-            if (MoveSelection(0, steps))
+            if (MoveSelection(0, steps, false))
             {
                 selectedChanged = true;
             }

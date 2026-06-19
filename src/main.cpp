@@ -1,4 +1,5 @@
 #include "ui/MainWindow.h"
+#include "ui/ConfigWindow.h"
 #include "common/Win32Error.h"
 
 #include <windows.h>
@@ -72,7 +73,7 @@ bool RedirectToExistingInstance(MainWindow::ActivationCommand command)
 }
 }
 
-int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
+int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int /*showCommand*/)
 {
     const HRESULT roInit = RoInitialize(RO_INIT_SINGLETHREADED);
     const bool shouldRoUninitialize = SUCCEEDED(roInit);
@@ -104,11 +105,25 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
         return redirected ? 0 : -1;
     }
 
-    const int initialShowCommand = command == MainWindow::ActivationCommand::Hide ? SW_HIDE : showCommand;
     MainWindow app;
-    if (!app.Initialize(instance, initialShowCommand))
+    if (!app.Initialize(instance, SW_HIDE))
     {
         MessageBoxW(nullptr, L"Failed to create the main window.", L"TouchRevGUI", MB_ICONERROR | MB_OK);
+        if (singleInstanceMutex)
+        {
+            CloseHandle(singleInstanceMutex);
+        }
+        if (shouldRoUninitialize)
+        {
+            RoUninitialize();
+        }
+        return -1;
+    }
+
+    ConfigWindow config;
+    if (!config.Initialize(instance, command == MainWindow::ActivationCommand::Hide ? SW_HIDE : SW_SHOWNORMAL))
+    {
+        MessageBoxW(nullptr, L"Failed to create the config window.", L"TouchRevGUI", MB_ICONERROR | MB_OK);
         if (singleInstanceMutex)
         {
             CloseHandle(singleInstanceMutex);
@@ -123,11 +138,12 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int showCommand)
     switch (command)
     {
     case MainWindow::ActivationCommand::Hide:
+        config.Hide();
         app.Hide();
         break;
     case MainWindow::ActivationCommand::Toggle:
     case MainWindow::ActivationCommand::Show:
-        app.ShowSwitcher();
+        config.Show();
         break;
     case MainWindow::ActivationCommand::Exit:
         app.ExitApplication();

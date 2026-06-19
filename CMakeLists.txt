@@ -5,13 +5,15 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 project(TouchRevGUI LANGUAGES CXX RC)
 
 option(TOUCHREV_BUILD_BLOCKER "Build TouchRev blocker hook and injector" OFF)
+option(TOUCHREV_BUILD_TOOLS "Build TouchRev development tools" ON)
 
 add_executable(TouchRevGUI WIN32
     src/main.cpp
     TouchRevGUI.rc
-    app.manifest
     src/ui/MainWindow.cpp
     src/ui/MainWindow.h
+    src/ui/ConfigWindow.cpp
+    src/ui/ConfigWindow.h
     src/appswitcher/CardView.cpp
     src/appswitcher/CardView.h
     src/appswitcher/LayoutEngine.cpp
@@ -39,6 +41,13 @@ add_executable(TouchRevGUI WIN32
 )
 
 target_compile_features(TouchRevGUI PRIVATE cxx_std_20)
+
+if(MSVC)
+    set_target_properties(TouchRevGUI PROPERTIES 
+        MSVC_MANIFEST OFF
+        LINK_FLAGS "/MANIFEST:NO"
+    )
+endif()
 
 target_include_directories(TouchRevGUI PRIVATE src)
 
@@ -82,45 +91,47 @@ if(NOT MSVC)
     target_link_libraries(TouchRevGUI PRIVATE uuid)
 endif()
 
-add_executable(RawTouchInputViewer WIN32
-    src/tools/RawTouchInputViewer.cpp
-    src/input/raw/RawTouchInput.cpp
-    src/input/raw/RawTouchInput.h
-    src/input/gesture/ThreeFingerGestureRecognizer.cpp
-    src/input/gesture/ThreeFingerGestureRecognizer.h
-    src/common/Win32Error.cpp
-    src/common/Win32Error.h
-)
+if(TOUCHREV_BUILD_TOOLS)
+    add_executable(RawTouchInputViewer WIN32
+        src/tools/RawTouchInputViewer.cpp
+        src/input/raw/RawTouchInput.cpp
+        src/input/raw/RawTouchInput.h
+        src/input/gesture/ThreeFingerGestureRecognizer.cpp
+        src/input/gesture/ThreeFingerGestureRecognizer.h
+        src/common/Win32Error.cpp
+        src/common/Win32Error.h
+    )
 
-target_compile_features(RawTouchInputViewer PRIVATE cxx_std_20)
-target_include_directories(RawTouchInputViewer PRIVATE src)
-target_compile_definitions(RawTouchInputViewer PRIVATE
-    UNICODE
-    _UNICODE
-    NOMINMAX
-    WIN32_LEAN_AND_MEAN
-    _WIN32_WINNT=0x0A00
-    NTDDI_VERSION=0x0A000000
-)
+    target_compile_features(RawTouchInputViewer PRIVATE cxx_std_20)
+    target_include_directories(RawTouchInputViewer PRIVATE src)
+    target_compile_definitions(RawTouchInputViewer PRIVATE
+        UNICODE
+        _UNICODE
+        NOMINMAX
+        WIN32_LEAN_AND_MEAN
+        _WIN32_WINNT=0x0A00
+        NTDDI_VERSION=0x0A000000
+    )
 
-if(MSVC)
-    target_compile_options(RawTouchInputViewer PRIVATE /W4 /permissive- /Zc:__cplusplus /EHsc)
-elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(RawTouchInputViewer PRIVATE -Wno-nonportable-include-path)
-endif()
+    if(MSVC)
+        target_compile_options(RawTouchInputViewer PRIVATE /W4 /permissive- /Zc:__cplusplus /EHsc)
+    elseif(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+        target_compile_options(RawTouchInputViewer PRIVATE -Wno-nonportable-include-path)
+    endif()
 
-target_link_libraries(RawTouchInputViewer PRIVATE
-    user32
-    gdi32
-    hid
-)
+    target_link_libraries(RawTouchInputViewer PRIVATE
+        user32
+        gdi32
+        hid
+    )
 
-if(MINGW)
-    target_link_options(RawTouchInputViewer PRIVATE -municode)
-endif()
+    if(MINGW)
+        target_link_options(RawTouchInputViewer PRIVATE -municode)
+    endif()
 
-if(NOT MSVC)
-    target_link_libraries(RawTouchInputViewer PRIVATE uuid)
+    if(NOT MSVC)
+        target_link_libraries(RawTouchInputViewer PRIVATE uuid)
+    endif()
 endif()
 
 add_custom_target(copy_touchrev_xaml ALL
@@ -128,6 +139,7 @@ add_custom_target(copy_touchrev_xaml ALL
     COMMAND ${CMAKE_COMMAND} -E copy_if_different
         "${CMAKE_CURRENT_SOURCE_DIR}/src/appswitcher/xaml/AppSwitcherRoot.xaml"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/appswitcher/xaml/SwitcherItem.xaml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/appswitcher/xaml/ConfigRoot.xaml"
         "$<TARGET_FILE_DIR:TouchRevGUI>/xaml"
 )
 add_dependencies(TouchRevGUI copy_touchrev_xaml)

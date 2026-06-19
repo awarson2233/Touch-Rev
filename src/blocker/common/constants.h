@@ -6,6 +6,7 @@ namespace touchrev {
 
 inline constexpr UINT kWorkerGestureMessage = 0xC029;
 inline constexpr UINT kShellTrayThreeFingerLongPressMessage = 0x05C6;
+inline constexpr UINT kShellTrayWindowManagerMessage = 0x0579;
 inline constexpr WPARAM kWorkerGestureBegin = 0x35;
 inline constexpr WPARAM kWorkerGestureEnd = 0x36;
 inline constexpr DWORD kDefaultBlockDurationMs = 6000;

@@ -26,6 +26,12 @@ bool ShouldBlockThreeFingerLongPressSignal(HWND hwnd, UINT msg) {
            WindowClassEquals(hwnd, kClassShellTrayWnd);
 }
 
+bool ShouldBlockThreeFingerSwipeDownSignal(HWND hwnd, UINT msg, WPARAM wParam) {
+    return msg == kShellTrayWindowManagerMessage &&
+           wParam == 3 &&
+           WindowClassEquals(hwnd, kClassShellTrayWnd);
+}
+
 bool ShouldBlockWorkerRoutingToAppThumbnail(HWND hwnd,
                                             UINT msg,
                                             WPARAM wParam,
@@ -105,6 +111,13 @@ bool ShouldBlockMessage(HWND hwnd,
         return true;
     }
 
+    if (ShouldBlockThreeFingerSwipeDownSignal(hwnd, msg, wParam)) {
+        if (reason) {
+            *reason = L"Shell_TrayWnd 0x0579 wParam=3 three-finger swipe-down";
+        }
+        return true;
+    }
+
     if (ShouldBlockWorkerRoutingToAppThumbnail(hwnd, msg, wParam, lParam)) {
         if (reason) {
             *reason = L"WorkerW 0xC029 -> AppThumbnailWindow";
@@ -124,10 +137,11 @@ bool ShouldBlockMessage(HWND hwnd,
 
 void ActivateFollowUpBlockers(HWND hwnd,
                               UINT msg,
-                              WPARAM /*wParam*/,
+                              WPARAM wParam,
                               LPARAM /*lParam*/,
                               PCWSTR reason) {
-    if (ShouldBlockThreeFingerLongPressSignal(hwnd, msg)) {
+    if (ShouldBlockThreeFingerLongPressSignal(hwnd, msg) ||
+        ShouldBlockThreeFingerSwipeDownSignal(hwnd, msg, wParam)) {
         StartRecentTaskSwitcherBlockWindow(reason);
     }
 }

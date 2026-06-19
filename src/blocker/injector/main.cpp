@@ -14,7 +14,7 @@
 
 namespace {
 
-constexpr PCWSTR kDefaultHookDllName = L"TouchRevHook.dll";
+constexpr PCWSTR kDefaultHookDllName = L"TouchRevBlockerHook.dll";
 
 enum class Command {
     None,

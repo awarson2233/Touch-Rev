@@ -14,7 +14,7 @@
 namespace touchrev {
 namespace {
 
-#if defined(TOUCHREV_ARCH_ARM64)
+#if defined(TOUCHREV_ARCH_ARM64) || defined(TOUCHREV_ARCH_X64)
 
 constexpr wchar_t kTwinuiPcshellModuleName[] = L"twinui.pcshell.dll";
 constexpr wchar_t kTouchGestureProcessorStartSwipeName[] =
@@ -40,11 +40,11 @@ void ClearTwinuiOriginals() {
     TouchGestureProcessorStartSwipe_Original = nullptr;
 }
 
-bool IsThreeFingerSwipeUp(int fingerCount,
-                          float deltaX,
-                          float deltaY,
-                          int* dx,
-                          int* dy) {
+bool IsAnyThreeFingerSwipe(int fingerCount,
+                           float deltaX,
+                           float deltaY,
+                           int* dx,
+                           int* dy) {
     if (dx) {
         *dx = 0;
     }
@@ -66,7 +66,7 @@ bool IsThreeFingerSwipeUp(int fingerCount,
         *dy = currentDy;
     }
 
-    return deltaY < 0.0f && std::fabs(deltaY) >= std::fabs(deltaX);
+    return true;
 }
 
 void WINAPI TouchGestureProcessorStartSwipe_Hook(
@@ -76,8 +76,8 @@ void WINAPI TouchGestureProcessorStartSwipe_Hook(
     int dx = 0;
     int dy = 0;
     bool shouldBlock =
-        point && IsThreeFingerSwipeUp(static_cast<int>(fingerCount), point->deltaX,
-                                      point->deltaY, &dx, &dy);
+        point && IsAnyThreeFingerSwipe(static_cast<int>(fingerCount), point->deltaX,
+                                       point->deltaY, &dx, &dy);
     LogMessage(L"hookdll", LogLevel::Info,
                L"event=TRACE api=twinui::TouchGestureProcessor::StartSwipe "
                L"fingerCount=%u dx=%d dy=%d block=%d",
@@ -90,7 +90,7 @@ void WINAPI TouchGestureProcessorStartSwipe_Hook(
                    L"event=BLOCKED "
                    L"api=twinui::TouchGestureProcessor::StartSwipe "
                    L"fingerCount=%u dx=%d dy=%d "
-                   L"reason=three-finger swipe-up",
+                   L"reason=any-three-finger-swipe",
                    fingerCount, dx, dy);
         g_inTwinuiHook = false;
         return;
@@ -125,12 +125,12 @@ bool DetachTwinuiHook(PVOID* targetPointer, PVOID hookPointer, PCWSTR apiName) {
     return true;
 }
 
-#endif  // TOUCHREV_ARCH_ARM64
+#endif  // TOUCHREV_ARCH_ARM64 || TOUCHREV_ARCH_X64
 
 }  // namespace
 
 bool InstallTwinuiGestureHooks() {
-#if defined(TOUCHREV_ARCH_ARM64)
+#if defined(TOUCHREV_ARCH_ARM64) || defined(TOUCHREV_ARCH_X64)
     bool expected = false;
     if (!g_twinuiHooksInstalled.compare_exchange_strong(expected, true)) {
         return true;
@@ -204,13 +204,13 @@ bool InstallTwinuiGestureHooks() {
 #else
     LogMessage(L"hookdll", LogLevel::Info,
                L"event=TWINUI_HOOK_SKIPPED api=twinui.pcshell "
-               L"reason=non-arm64-build");
+               L"reason=unsupported-build-architecture");
     return true;
 #endif
 }
 
 bool UninstallTwinuiGestureHooks() {
-#if defined(TOUCHREV_ARCH_ARM64)
+#if defined(TOUCHREV_ARCH_ARM64) || defined(TOUCHREV_ARCH_X64)
     bool expected = true;
     if (!g_twinuiHooksInstalled.compare_exchange_strong(expected, false)) {
         return true;
