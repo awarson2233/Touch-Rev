@@ -17,7 +17,6 @@
 #include <memory>
 #include <string>
 #include <functional>
-#include <optional>
 
 namespace touchrev::appswitcher
 {
@@ -56,7 +55,7 @@ public:
     bool grabbed = false;
     AppSwitcherPalette palette_{};
 
-    static std::optional<CardView> Create(
+    static std::unique_ptr<CardView> Create(
         const AppSwitcherPalette& palette,
         size_t index,
         CardCallbacks callbacks);

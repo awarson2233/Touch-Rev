@@ -57,12 +57,11 @@ bool ShouldRecreateThumbnail(
 
 namespace touchrev::appswitcher
 {
-std::optional<CardView> CardView::Create(
+std::unique_ptr<CardView> CardView::Create(
     const AppSwitcherPalette& palette,
     size_t index,
     CardCallbacks callbacks)
 {
-    CardView item;
     try
     {
         constexpr wchar_t kItemXamlPath[] = L"xaml/SwitcherItem.xaml";
@@ -70,7 +69,8 @@ std::optional<CardView> CardView::Create(
         auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
         auto rootElement = object.as<winrt::Windows::UI::Xaml::FrameworkElement>();
 
-        if (item.Initialize(rootElement, palette, index, callbacks))
+        auto item = std::make_unique<CardView>();
+        if (item->Initialize(rootElement, palette, index, callbacks))
         {
             return item;
         }
@@ -78,7 +78,7 @@ std::optional<CardView> CardView::Create(
     catch (const winrt::hresult_error&)
     {
     }
-    return std::nullopt;
+    return nullptr;
 }
 
 bool CardView::Initialize(

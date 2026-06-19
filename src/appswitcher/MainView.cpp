@@ -63,7 +63,7 @@ std::vector<ItemGeometry> MainView::GetItemGeometries() const
     geometries.reserve(cards_.size());
     for (const auto& item : cards_)
     {
-        geometries.push_back({item.layoutPosition, item.layoutSize, item.visible});
+        geometries.push_back({item->layoutPosition, item->layoutSize, item->visible});
     }
     return geometries;
 }
@@ -96,7 +96,7 @@ void MainView::Shutdown()
 {
     for (auto& item : cards_)
     {
-        item.Reset(palette_);
+        item->Reset(palette_);
     }
     cards_.clear();
     appSwitcherContainer_ = nullptr;
@@ -135,14 +135,14 @@ bool MainView::HitTest(PointDip point) const
 
     for (const auto& item : cards_)
     {
-        if (!item.visible)
+        if (!item->visible)
         {
             continue;
         }
 
-        if (point.x >= item.layoutPosition.x && point.y >= item.layoutPosition.y &&
-            point.x <= item.layoutPosition.x + item.layoutSize.width &&
-            point.y <= item.layoutPosition.y + item.layoutSize.height)
+        if (point.x >= item->layoutPosition.x && point.y >= item->layoutPosition.y &&
+            point.x <= item->layoutPosition.x + item->layoutSize.width &&
+            point.y <= item->layoutPosition.y + item->layoutSize.height)
         {
             return true;
         }
@@ -198,7 +198,7 @@ bool MainView::CanNavigateSelection() const
 
 bool MainView::SetSelectedIndex(size_t index)
 {
-    if (index >= cards_.size() || !cards_[index].visible)
+    if (index >= cards_.size() || !cards_[index]->visible)
     {
         return false;
     }
@@ -300,7 +300,7 @@ bool MainView::ActivateSelectedItem()
         return false;
     }
 
-    HWND hwnd = cards_[selectedItemIndex_].hwnd;
+    HWND hwnd = cards_[selectedItemIndex_]->hwnd;
     if (!hwnd || !itemActivatedCallback_)
     {
         return false;
@@ -348,7 +348,7 @@ void MainView::ApplyTheme(const AppSwitcherPalette& palette)
 
     for (auto& item : cards_)
     {
-        item.ApplyTheme(palette_);
+        item->ApplyTheme(palette_);
     }
 }
 
@@ -367,16 +367,16 @@ void MainView::ResetInteractionState()
 
     for (auto& item : cards_)
     {
-        item.hovered = false;
-        item.pressed = false;
-        item.grabbed = false;
-        if (item.root)
+        item->hovered = false;
+        item->pressed = false;
+        item->grabbed = false;
+        if (item->root)
         {
-            item.root.Visibility(item.visible
+            item->root.Visibility(item->visible
                                      ? winrt::Windows::UI::Xaml::Visibility::Visible
                                      : winrt::Windows::UI::Xaml::Visibility::Collapsed);
         }
-        item.ApplyInteractionState(palette_);
+        item->ApplyInteractionState(palette_);
     }
 }
 
@@ -400,15 +400,15 @@ void MainView::BeginGrab(size_t itemIndex)
     for (size_t i = 0; i < cards_.size(); ++i)
     {
         auto& item = cards_[i];
-        item.pressed = false;
-        item.grabbed = i == itemIndex;
-        if (item.root && item.visible)
+        item->pressed = false;
+        item->grabbed = i == itemIndex;
+        if (item->root && item->visible)
         {
-            item.root.Visibility(i == itemIndex
+            item->root.Visibility(i == itemIndex
                                      ? winrt::Windows::UI::Xaml::Visibility::Visible
                                      : winrt::Windows::UI::Xaml::Visibility::Collapsed);
         }
-        item.ApplyInteractionState(palette_);
+        item->ApplyInteractionState(palette_);
     }
 }
 
@@ -420,8 +420,8 @@ void MainView::FinishPressedItem(size_t itemIndex, PointDip releasePoint)
         return;
     }
 
-    HWND hwnd = cards_[itemIndex].hwnd;
-    const bool wasGrabbed = cards_[itemIndex].grabbed;
+    HWND hwnd = cards_[itemIndex]->hwnd;
+    const bool wasGrabbed = cards_[itemIndex]->grabbed;
     const POINT releaseScreenPoint = DipPointToScreenPixel(releasePoint);
     ResetInteractionState();
 
@@ -447,7 +447,7 @@ void MainView::HandleItemCloseRequested(size_t itemIndex)
         return;
     }
 
-    HWND hwnd = cards_[itemIndex].hwnd;
+    HWND hwnd = cards_[itemIndex]->hwnd;
     if (!hwnd)
     {
         return;
@@ -559,7 +559,7 @@ bool MainView::LoadRoot()
     }
 }
 
-CardView MainView::CreateItem()
+std::unique_ptr<CardView> MainView::CreateItem()
 {
     const size_t itemIndex = cards_.size();
     CardCallbacks callbacks;
@@ -583,21 +583,20 @@ CardView MainView::CreateItem()
     callbacks.onPointerCanceled = [this](size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args) {
         if (index < cards_.size())
         {
-            cards_[index].root.ReleasePointerCapture(args.Pointer());
+            cards_[index]->root.ReleasePointerCapture(args.Pointer());
         }
         ResetInteractionState();
         args.Handled(true);
     };
 
-    auto itemOpt = CardView::Create(palette_, itemIndex, callbacks);
-    if (!itemOpt)
+    auto item = CardView::Create(palette_, itemIndex, callbacks);
+    if (!item)
     {
-        return {};
+        return nullptr;
     }
 
-    CardView item = std::move(*itemOpt);
-    winrt::Windows::UI::Xaml::Controls::Canvas::SetZIndex(item.root, 10);
-    layoutCanvas_.Children().Append(item.root);
+    winrt::Windows::UI::Xaml::Controls::Canvas::SetZIndex(item->root, 10);
+    layoutCanvas_.Children().Append(item->root);
     return item;
 }
 
@@ -619,12 +618,12 @@ void MainView::ProcessItemPressed(size_t index, winrt::Windows::UI::Xaml::Input:
     xamlPointerPressed_ = true;
     xamlPointerDragging_ = false;
     pressPointDip_ = logicalPoint;
-    xamlDragOffsetX_ = logicalPoint.x - cards_[index].layoutPosition.x;
-    xamlDragOffsetY_ = logicalPoint.y - cards_[index].layoutPosition.y;
-    cards_[index].pressed = true;
-    cards_[index].hovered = false;
-    cards_[index].ApplyInteractionState(palette_);
-    cards_[index].root.CapturePointer(args.Pointer());
+    xamlDragOffsetX_ = logicalPoint.x - cards_[index]->layoutPosition.x;
+    xamlDragOffsetY_ = logicalPoint.y - cards_[index]->layoutPosition.y;
+    cards_[index]->pressed = true;
+    cards_[index]->hovered = false;
+    cards_[index]->ApplyInteractionState(palette_);
+    cards_[index]->root.CapturePointer(args.Pointer());
     args.Handled(true);
 }
 
@@ -640,7 +639,7 @@ void MainView::ProcessItemMoved(winrt::Windows::UI::Xaml::Input::PointerRoutedEv
     const PointDip logicalPoint{
         static_cast<float>(point.X + visibleOriginDip_.x),
         static_cast<float>(point.Y + visibleOriginDip_.y)};
-    auto& activeItem = cards_[activeDragItemIndex_];
+    auto& activeItem = *cards_[activeDragItemIndex_];
     constexpr double dragThresholdDip = 10.0;
     if (xamlPointerPressed_ && touchrev::common::Distance(logicalPoint, pressPointDip_) > dragThresholdDip)
     {
@@ -675,7 +674,7 @@ void MainView::ProcessItemReleased(winrt::Windows::UI::Xaml::Input::PointerRoute
         static_cast<float>(point.Y + visibleOriginDip_.y)};
     if (itemIndexToFinish < cards_.size())
     {
-        cards_[itemIndexToFinish].root.ReleasePointerCapture(args.Pointer());
+        cards_[itemIndexToFinish]->root.ReleasePointerCapture(args.Pointer());
     }
     FinishPressedItem(itemIndexToFinish, releasePoint);
     args.Handled(true);
@@ -686,8 +685,8 @@ void MainView::EnsureItemCount(size_t count)
 {
     while (cards_.size() < count)
     {
-        CardView item = CreateItem();
-        if (!item.root)
+        auto item = CreateItem();
+        if (!item || !item->root)
         {
             break;
         }
@@ -724,13 +723,13 @@ void MainView::UpdateVisibleBoundsAndPositions()
 
     for (auto& item : cards_)
     {
-        if (!item.root || !item.visible)
+        if (!item->root || !item->visible)
         {
             continue;
         }
 
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(item.root, item.layoutPosition.x);
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(item.root, item.layoutPosition.y);
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(item->root, item->layoutPosition.x);
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(item->root, item->layoutPosition.y);
     }
 
     EnsureSelectedIndex();
@@ -739,7 +738,7 @@ void MainView::UpdateVisibleBoundsAndPositions()
 
 void MainView::EnsureSelectedIndex()
 {
-    if (selectedItemIndex_ < cards_.size() && cards_[selectedItemIndex_].visible)
+    if (selectedItemIndex_ < cards_.size() && cards_[selectedItemIndex_]->visible)
     {
         return;
     }
@@ -747,7 +746,7 @@ void MainView::EnsureSelectedIndex()
     selectedItemIndex_ = static_cast<size_t>(-1);
     for (size_t i = 0; i < cards_.size(); ++i)
     {
-        if (cards_[i].visible)
+        if (cards_[i]->visible)
         {
             selectedItemIndex_ = i;
             return;
@@ -763,13 +762,13 @@ void MainView::UpdateSelectionVisual()
     }
 
     if (xamlPointerDragging_ || selectedItemIndex_ == static_cast<size_t>(-1) ||
-        selectedItemIndex_ >= cards_.size() || !cards_[selectedItemIndex_].visible)
+        selectedItemIndex_ >= cards_.size() || !cards_[selectedItemIndex_]->visible)
     {
         focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
         return;
     }
 
-    const auto& selectedItem = cards_[selectedItemIndex_];
+    const auto& selectedItem = *cards_[selectedItemIndex_];
     constexpr double inflationDip = 10.0;
     winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(
         focusBorder_,
@@ -815,7 +814,7 @@ void MainView::ApplyLayout(
     for (size_t i = 0; i < cards_.size(); ++i)
     {
         const bool visible = i < windows.size() && i < layout.items.size();
-        auto& item = cards_[i];
+        auto& item = *cards_[i];
         if (!item.root)
         {
             continue;

@@ -18,6 +18,7 @@
 
 #include <functional>
 #include <vector>
+#include <memory>
 
 namespace touchrev::appswitcher
 {
@@ -48,7 +49,7 @@ public:
 private:
     std::vector<ItemGeometry> GetItemGeometries() const;
     bool LoadRoot();
-    CardView CreateItem();
+    std::unique_ptr<CardView> CreateItem();
     void EnsureItemCount(size_t count);
     void ApplyLayout(const std::vector<WindowItem>& windows, UINT widthPx, UINT heightPx, double scale);
     void AttachPointerHandlers();
@@ -78,7 +79,7 @@ private:
     winrt::Windows::UI::Xaml::FrameworkElement emptyGrid_{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock emptyIcon_{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock emptyText_{nullptr};
-    std::vector<CardView> cards_;
+    std::vector<std::unique_ptr<CardView>> cards_;
     PointDip dragPosition_{};
     PointDip contentOriginDip_{};
     PointDip visibleOriginDip_{};
