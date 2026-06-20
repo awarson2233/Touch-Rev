@@ -37,8 +37,11 @@
                         VerticalAlignment="Center">
                         <Image
                             x:Name="AppIcon"
-                            MaxWidth="16"
-                            MaxHeight="16"
+                            Width="16"
+                            Height="16"
+                            Stretch="Uniform"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
                             Visibility="Collapsed" />
                         <TextBlock
                             x:Name="DefaultIcon"

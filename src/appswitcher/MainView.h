@@ -47,6 +47,7 @@ public:
     bool ActivateSelectedItem();
     bool AccumulateAndMoveSelection(double deltaX, double deltaY);
     void ClearGestureAccumulator();
+    void ResetSelection();
 
 private:
     std::vector<ItemGeometry> GetItemGeometries() const;

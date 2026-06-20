@@ -40,6 +40,7 @@ public:
     winrt::Windows::UI::Xaml::Controls::Border titleBorder{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock title{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock defaultIcon{nullptr};
+    winrt::Windows::UI::Xaml::Controls::Image appIcon{nullptr};
     winrt::Windows::UI::Xaml::Controls::Button closeButton{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border thumbnailHost{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border pressOverlay{nullptr};
@@ -53,6 +54,7 @@ public:
     bool hovered = false;
     bool pressed = false;
     bool grabbed = false;
+    bool closeButtonHovered = false;
     AppSwitcherPalette palette_{};
 
     static std::unique_ptr<CardView> Create(
@@ -78,7 +80,6 @@ public:
     void ApplyRowWeights();
     void ApplyTheme(const AppSwitcherPalette& palette);
     void ApplyInteractionState(const AppSwitcherPalette& palette);
-    void ApplyCloseButtonHoverState(const AppSwitcherPalette& palette, bool isHovered);
     void ClearThumbnail();
     void Reset(const AppSwitcherPalette& palette);
     void SetRootVisibility(bool isVisible);
@@ -103,7 +104,9 @@ public:
         double dpiScale);
 
 private:
+    void UpdateVisualState();
     void Destroy();
+    void LoadAppIcon();
 };
 }
 

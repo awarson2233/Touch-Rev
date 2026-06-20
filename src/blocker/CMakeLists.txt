@@ -104,15 +104,7 @@ target_link_libraries(TouchRevBlockerHook PRIVATE touchrev_blocker_common touchr
 target_compile_options(TouchRevBlockerHook PRIVATE /W4 /permissive- /EHsc)
 target_compile_definitions(TouchRevBlockerHook PRIVATE TOUCHREV_HOOKDLL_BUILD)
 
-add_executable(TouchRevBlockerInjector
-    injector/main.cpp
-    injector/process_find.cpp
-    injector/inject.cpp
-)
-target_link_libraries(TouchRevBlockerInjector PRIVATE touchrev_blocker_common user32)
-target_compile_options(TouchRevBlockerInjector PRIVATE /W4 /permissive- /EHsc)
-
-set_target_properties(TouchRevBlockerHook TouchRevBlockerInjector PROPERTIES
+set_target_properties(TouchRevBlockerHook PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:TouchRevGUI>"
     LIBRARY_OUTPUT_DIRECTORY "$<TARGET_FILE_DIR:TouchRevGUI>"
     ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/blocker"
@@ -120,5 +112,4 @@ set_target_properties(TouchRevBlockerHook TouchRevBlockerInjector PROPERTIES
 
 target_compile_features(touchrev_blocker_common PRIVATE cxx_std_20)
 target_compile_features(TouchRevBlockerHook PRIVATE cxx_std_20)
-target_compile_features(TouchRevBlockerInjector PRIVATE cxx_std_20)
 

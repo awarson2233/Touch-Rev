@@ -52,6 +52,7 @@ public:
 
     Result OnTouch(HWND hwnd, WPARAM wParam, LPARAM lParam, const CoordinateSpace& coordinates, PointDip currentPosition, bool canStartDrag);
     RawInputResult OnRawInput(LPARAM lParam);
+    RawInputResult OnGestureTick();
 
     bool IsDragging() const { return pointerDragging_ || mouseDragging_ || touchDragging_; }
     PointDip EvaluateVisualPosition() const;
@@ -76,6 +77,12 @@ private:
     void RecordSample(PointDip point, std::int64_t qpc);
     PointDip PredictPointerPosition(std::int64_t nowQpc) const;
 
+    // 把识别器事件映射成 RawInputResult。frame 为空表示来自定时 Tick（无新输入帧）。
+    RawInputResult MapGestureEvent(
+        const ThreeFingerGestureRecognizer::Result& gestureResult,
+        const RawTouchInput::Frame* frame,
+        bool allContactsReleased);
+
     HWND hwnd_ = nullptr;
     bool pointerDragging_ = false;
     bool mouseDragging_ = false;
@@ -92,4 +99,6 @@ private:
     float smoothedVelocityX_ = 0.0f;
     float smoothedVelocityY_ = 0.0f;
     bool hasSmoothedVelocity_ = false;
+    // 长按手势期间缓存的显示旋转（0/90/180/270 对应 0..3），在 LongPressBegin 计算一次。
+    int cachedGestureRotation_ = 0;
 };

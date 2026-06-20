@@ -4,6 +4,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 project(TouchRevGUI LANGUAGES CXX RC)
 
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+
 option(TOUCHREV_BUILD_BLOCKER "Build TouchRev blocker hook and injector" OFF)
 option(TOUCHREV_BUILD_TOOLS "Build TouchRev development tools" ON)
 
@@ -30,6 +32,8 @@ add_executable(TouchRevGUI WIN32
     src/thumbnail/PrivateThumbnailManager.cpp
     src/thumbnail/PrivateThumbnailManager.h
     src/common/CoordinateSpace.h
+    src/common/IconUtils.cpp
+    src/common/IconUtils.h
     src/input/InputController.cpp
     src/input/InputController.h
     src/input/raw/RawTouchInput.cpp
@@ -84,6 +88,8 @@ target_link_libraries(TouchRevGUI PRIVATE
     ole32
     runtimeobject
     advapi32
+    shell32
+    propsys
     hid
 )
 
@@ -146,6 +152,15 @@ add_dependencies(TouchRevGUI copy_touchrev_xaml)
 
 if(TOUCHREV_BUILD_BLOCKER)
     add_subdirectory(src/blocker)
+    target_compile_definitions(TouchRevGUI PRIVATE TOUCHREV_BUILD_BLOCKER)
+    target_sources(TouchRevGUI PRIVATE
+        src/blocker/injector/inject.cpp
+        src/blocker/injector/inject.h
+        src/blocker/injector/process_find.cpp
+        src/blocker/injector/process_find.h
+    )
+    target_include_directories(TouchRevGUI PRIVATE src/blocker)
+    target_link_libraries(TouchRevGUI PRIVATE touchrev_blocker_common)
 endif()
 
 set_property(TARGET TouchRevGUI PROPERTY VS_DEBUGGER_WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}")

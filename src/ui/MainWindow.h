@@ -43,8 +43,9 @@ private:
     void RefreshTheme();
     void SyncClientLayout(UINT width, UINT height, bool renderSwitcher);
     void RebaseActiveDrag();
-    void UpdateTransparentRegion();
+    void ForwardDpiChangeToChild(WPARAM wParam, LPARAM lParam);
     void HandleInputResult(const InputController::Result& result);
+    void DispatchGestureAction(const InputController::RawInputResult& inputResult);
     bool HandleKeyDown(WPARAM key);
     HMONITOR ResolveTargetMonitor() const;
     MONITORINFO LoadMonitorInfo(HMONITOR monitor) const;

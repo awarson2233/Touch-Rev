@@ -7,8 +7,6 @@
 #include <algorithm>
 #include <cmath>
 #include <vector>
-#include <fstream>
-#include <sstream>
 
 namespace
 {
@@ -107,27 +105,11 @@ ScreenRotation GetDisplayRotationFromTouchFrame(const RawTouchInput::Frame& fram
 
     return RotationFromMonitor(MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY));
 }
-
-void LogToFile(const std::wstring& text)
-{
-    std::wofstream logFile("touchrev_debug.log", std::ios::app);
-    if (logFile.is_open())
-    {
-        logFile << text << std::endl;
-    }
-}
 }
 
 void InputController::Initialize(HWND hwnd)
 {
     hwnd_ = hwnd;
-    {
-        std::wofstream logFile("touchrev_debug.log", std::ios::trunc);
-        if (logFile.is_open())
-        {
-            logFile << L"=== TouchRev Debug Session Started ===" << std::endl;
-        }
-    }
     if (!EnableMouseInPointer(TRUE))
     {
         DebugLog(L"EnableMouseInPointer failed; mouse fallback messages remain enabled.");
@@ -327,27 +309,44 @@ InputController::RawInputResult InputController::OnRawInput(LPARAM lParam)
     }
 
     const ThreeFingerGestureRecognizer::Result gestureResult = gestureRecognizer_.ProcessFrame(frame);
-    if (gestureResult.type == ThreeFingerGestureRecognizer::EventType::DoubleTap)
+    return MapGestureEvent(gestureResult, &frame, allContactsReleased);
+}
+
+InputController::RawInputResult InputController::OnGestureTick()
+{
+    // 无新输入帧时定时推进状态机：静止三指长按到 400ms 才能稳定进入长按。
+    const ThreeFingerGestureRecognizer::Result gestureResult = gestureRecognizer_.Tick();
+    return MapGestureEvent(gestureResult, nullptr, false);
+}
+
+InputController::RawInputResult InputController::MapGestureEvent(
+    const ThreeFingerGestureRecognizer::Result& gestureResult,
+    const RawTouchInput::Frame* frame,
+    bool allContactsReleased)
+{
+    using EventType = ThreeFingerGestureRecognizer::EventType;
+
+    if (gestureResult.type == EventType::DoubleTap)
     {
         return {.handled = true, .action = InputAction::ShowSwitcher, .allContactsReleased = allContactsReleased};
     }
-    else if (gestureResult.type == ThreeFingerGestureRecognizer::EventType::LongPressStarted)
+    else if (gestureResult.type == EventType::LongPressStarted)
     {
-        const ScreenRotation rotation = GetDisplayRotationFromTouchFrame(frame, hwnd_);
-        std::wstringstream ss;
-        ss << L"[LongPressBegin] Touch Monitor Rotation: " << static_cast<int>(rotation);
-        LogToFile(ss.str());
+        // 旋转在手势开始时算一次并缓存，整段长按内复用，避免每帧查询显示配置。
+        const ScreenRotation rotation = frame
+                                            ? GetDisplayRotationFromTouchFrame(*frame, hwnd_)
+                                            : RotationFromMonitor(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST));
+        cachedGestureRotation_ = static_cast<int>(rotation);
         return {.handled = true, .action = InputAction::LongPressBegin, .allContactsReleased = allContactsReleased};
     }
-    else if (gestureResult.type == ThreeFingerGestureRecognizer::EventType::LongPressMoved)
+    else if (gestureResult.type == EventType::LongPressMoved)
     {
-        double dx = gestureResult.delta.x;
-        double dy = gestureResult.delta.y;
+        const double dx = gestureResult.delta.x;
+        const double dy = gestureResult.delta.y;
 
-        const ScreenRotation rotation = GetDisplayRotationFromTouchFrame(frame, hwnd_);
         double adjX = dx;
         double adjY = dy;
-        switch (rotation)
+        switch (static_cast<ScreenRotation>(cachedGestureRotation_))
         {
         case ScreenRotation::Rotation0:
             adjX = dx;
@@ -367,12 +366,6 @@ InputController::RawInputResult InputController::OnRawInput(LPARAM lParam)
             break;
         }
 
-        std::wstringstream ss;
-        ss << L"[LongPressMove] Original: (" << dx << L", " << dy
-           << L"), Adjusted: (" << adjX << L", " << adjY
-           << L") at Rotation: " << static_cast<int>(rotation);
-        LogToFile(ss.str());
-
         return {
             .handled = true,
             .action = InputAction::LongPressMove,
@@ -381,9 +374,8 @@ InputController::RawInputResult InputController::OnRawInput(LPARAM lParam)
             .allContactsReleased = allContactsReleased
         };
     }
-    else if (gestureResult.type == ThreeFingerGestureRecognizer::EventType::LongPressEnded)
+    else if (gestureResult.type == EventType::LongPressEnded)
     {
-        LogToFile(L"[LongPressEnd] Ended");
         return {.handled = true, .action = InputAction::LongPressEnd, .allContactsReleased = allContactsReleased};
     }
 

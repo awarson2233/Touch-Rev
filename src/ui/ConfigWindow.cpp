@@ -4,6 +4,12 @@
 #include "common/FileUtils.h"
 #include "common/PathUtils.h"
 
+#if defined(TOUCHREV_BUILD_BLOCKER)
+#include "injector/inject.h"
+#include "injector/process_find.h"
+#include "common/winutil.h"
+#endif
+
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.UI.Xaml.h>
@@ -12,7 +18,6 @@
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 
 #include <tlhelp32.h>
-#include <vector>
 
 struct IDesktopWindowXamlSourceNative : IUnknown
 {
@@ -354,33 +359,114 @@ void ConfigWindow::ToggleHook(bool enable)
 {
     isTogglingHook_ = true;
 
-    std::wstring injectorPath = touchrev::common::ModuleRelativePath(L"TouchRevBlockerInjector.exe");
-    std::wstring commandLine = L"\"" + injectorPath + (enable ? L"\" --install" : L"\" --uninstall");
+#if defined(TOUCHREV_BUILD_BLOCKER)
+    std::wstring fullDllPath = touchrev::common::ModuleRelativePath(L"TouchRevBlockerHook.dll");
 
-    std::vector<wchar_t> cmdBuffer(commandLine.begin(), commandLine.end());
-    cmdBuffer.push_back(L'\0');
-
-    STARTUPINFOW si{};
-    si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESHOWWINDOW;
-    si.wShowWindow = SW_HIDE;
-    PROCESS_INFORMATION pi{};
-
-    if (CreateProcessW(
-            nullptr,
-            cmdBuffer.data(),
-            nullptr,
-            nullptr,
-            FALSE,
-            CREATE_NO_WINDOW,
-            nullptr,
-            nullptr,
-            &si,
-            &pi))
+    std::wstring error;
+    
+    // 1. 确认 DLL 文件存在
+    DWORD attributes = GetFileAttributesW(fullDllPath.c_str());
+    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
     {
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
+        MessageBoxW(hwnd_, (L"找不到 Hook DLL 文件:\n" + fullDllPath).c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
+        isTogglingHook_ = false;
+        return;
     }
+
+    // 2. 校验 DLL 机器架构类型
+    USHORT dllMachine = IMAGE_FILE_MACHINE_UNKNOWN;
+    if (!touchrev::GetPeMachineType(fullDllPath, &dllMachine))
+    {
+        MessageBoxW(hwnd_, L"读取 DLL PE 机器类型失败。", L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
+        isTogglingHook_ = false;
+        return;
+    }
+
+    if (dllMachine != touchrev::CurrentBuildMachineType())
+    {
+        std::wstring msg = L"DLL 架构与当前构建架构不匹配。\n预期: " +
+                           std::wstring(touchrev::CurrentBuildArchName()) +
+                           L"\n实际: " + touchrev::MachineTypeToString(dllMachine);
+        MessageBoxW(hwnd_, msg.c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
+        isTogglingHook_ = false;
+        return;
+    }
+
+    // 3. 校验当前进程是否为 native
+    if (!touchrev::IsCurrentProcessNativeForCurrentBuild(&error))
+    {
+        MessageBoxW(hwnd_, (L"当前进程校验失败:\n" + error).c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
+        isTogglingHook_ = false;
+        return;
+    }
+
+    // 4. 查找资源管理器进程
+    touchrev::TargetProcess target;
+    if (!touchrev::FindShellExplorer(&target, &error))
+    {
+        MessageBoxW(hwnd_, (L"寻找资源管理器失败:\n" + error).c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
+        isTogglingHook_ = false;
+        return;
+    }
+
+    // 5. 校验目标进程架构是否匹配
+    if (!touchrev::IsNativeMachineForCurrentBuild(target.processMachine, target.nativeMachine))
+    {
+        std::wstring msg = L"目标 explorer.exe 架构与当前构建架构不匹配。\n预期: " +
+                           std::wstring(touchrev::CurrentBuildArchName()) +
+                           L"\n进程架构: " + touchrev::MachineTypeToString(target.processMachine) +
+                           L"\n原生架构: " + touchrev::MachineTypeToString(target.nativeMachine);
+        MessageBoxW(hwnd_, msg.c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
+        isTogglingHook_ = false;
+        return;
+    }
+
+    // 6. 查询 DLL 加载状态
+    touchrev::RemoteModuleInfo moduleInfo;
+    if (!touchrev::QueryRemoteDllModule(target.pid, fullDllPath, &moduleInfo, &error))
+    {
+        MessageBoxW(hwnd_, (L"查询模块状态失败:\n" + error).c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
+        isTogglingHook_ = false;
+        return;
+    }
+
+    if (enable)
+    {
+        // 安装 Hook
+        if (moduleInfo.module)
+        {
+            // 已加载，无需重复注入
+            isTogglingHook_ = false;
+            return;
+        }
+
+        HMODULE remoteModule = nullptr;
+        if (!touchrev::InjectDllIntoProcess(target.pid, fullDllPath, &remoteModule, &error))
+        {
+            MessageBoxW(hwnd_, (L"注入 Hook DLL 失败:\n" + error).c_str(), L"Touch-Rev 注入失败", MB_OK | MB_ICONERROR);
+        }
+    }
+    else
+    {
+        // 卸载 Hook
+        if (!moduleInfo.module)
+        {
+            // 未加载，无需卸载
+            isTogglingHook_ = false;
+            return;
+        }
+
+        touchrev::RemoteModuleInfo unloadedModule;
+        DWORD freeLibraryResult = 0;
+        if (!touchrev::UninstallDllFromProcess(target.pid, fullDllPath, &unloadedModule, &freeLibraryResult, &error))
+        {
+            MessageBoxW(hwnd_, (L"卸载 Hook DLL 失败:\n" + error).c_str(), L"Touch-Rev 卸载失败", MB_OK | MB_ICONERROR);
+        }
+    }
+
+#else
+    MessageBoxW(hwnd_, L"未启用 Blocker 构建，无法执行 Hook 操作。", L"Touch-Rev 提示", MB_OK | MB_ICONWARNING);
+#endif
 
     isTogglingHook_ = false;
 }

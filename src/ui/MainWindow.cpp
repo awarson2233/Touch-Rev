@@ -12,6 +12,10 @@ namespace
 {
 constexpr wchar_t kWindowTitle[] = L"Touch Rev GUI";
 
+// 与 RawTouchInputViewer 对齐：定时推进三指长按状态机（静止时硬件不持续上报帧）。
+constexpr UINT_PTR kGestureTimerId = 1;
+constexpr UINT kGestureTimerMs = 16;
+
 #if defined(WM_DWMCOMPOSITIONCHANGED)
 constexpr UINT kWmDwmCompositionChanged = WM_DWMCOMPOSITIONCHANGED;
 #else
@@ -20,18 +24,17 @@ constexpr UINT kWmDwmCompositionChanged = 0x031E;
 
 float GetMonitorDpi(HMONITOR monitor)
 {
+    typedef HRESULT(WINAPI* GetDpiForMonitorProc)(HMONITOR, int, UINT*, UINT*);
+    static const auto getDpiForMonitor = []() -> GetDpiForMonitorProc {
+        HMODULE shcore = LoadLibraryW(L"shcore.dll");
+        return shcore ? reinterpret_cast<GetDpiForMonitorProc>(GetProcAddress(shcore, "GetDpiForMonitor")) : nullptr;
+    }();
+
     UINT dpiX = 96;
     UINT dpiY = 96;
-    HMODULE shcore = LoadLibraryW(L"shcore.dll");
-    if (shcore)
+    if (getDpiForMonitor)
     {
-        typedef HRESULT(WINAPI* GetDpiForMonitorProc)(HMONITOR, int, UINT*, UINT*);
-        auto getDpiForMonitor = reinterpret_cast<GetDpiForMonitorProc>(GetProcAddress(shcore, "GetDpiForMonitor"));
-        if (getDpiForMonitor)
-        {
-            getDpiForMonitor(monitor, 0, &dpiX, &dpiY);
-        }
-        FreeLibrary(shcore);
+        getDpiForMonitor(monitor, 0, &dpiX, &dpiY);
     }
     return static_cast<float>(dpiX);
 }
@@ -242,49 +245,21 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
             return 0;
         }
 
-        const InputController::RawInputResult inputResult = inputController_.OnRawInput(lParam);
-        if (inputResult.action == InputController::InputAction::ShowSwitcher)
-        {
-            if (touchrev::settings::g_IsSwitcherWindowEnabled)
-            {
-                ShowSwitcher();
-            }
-        }
-        else if (inputResult.action == InputController::InputAction::LongPressBegin)
-        {
-            if (touchrev::settings::g_IsSwitcherWindowEnabled)
-            {
-                ShowSwitcher();
-                isLongPressNavigating_ = true;
-                pendingLongPressActivation_ = false;
-                appSwitcherMainView_.ClearGestureAccumulator();
-            }
-        }
-        else if (inputResult.action == InputController::InputAction::LongPressMove)
-        {
-            if (isLongPressNavigating_ && isVisible_)
-            {
-                appSwitcherMainView_.AccumulateAndMoveSelection(inputResult.deltaX, inputResult.deltaY);
-            }
-        }
-        else if (inputResult.action == InputController::InputAction::LongPressEnd)
-        {
-            if (isLongPressNavigating_)
-            {
-                isLongPressNavigating_ = false;
-                pendingLongPressActivation_ = isVisible_;
-            }
-        }
-
-        if (pendingLongPressActivation_ && inputResult.allContactsReleased)
-        {
-            pendingLongPressActivation_ = false;
-            if (isVisible_)
-            {
-                appSwitcherMainView_.ActivateSelectedItem();
-            }
-        }
+        DispatchGestureAction(inputController_.OnRawInput(lParam));
         return 0;
+    }
+
+    case WM_TIMER:
+    {
+        if (wParam == kGestureTimerId)
+        {
+            if (touchrev::settings::g_IsGestureEnabled)
+            {
+                DispatchGestureAction(inputController_.OnGestureTick());
+            }
+            return 0;
+        }
+        break;
     }
 
     case WM_POINTERDOWN:
@@ -429,13 +404,15 @@ HRESULT MainWindow::OnCreate()
         return E_FAIL;
     }
     appSwitcherMainView_.ApplyTheme(themeManager_.Palette());
-    UpdateTransparentRegion();
+ 
+    SetTimer(hwnd_, kGestureTimerId, kGestureTimerMs, nullptr);
 
     return S_OK;
 }
 
 void MainWindow::OnDestroy()
 {
+    KillTimer(hwnd_, kGestureTimerId);
     appSwitcherMainView_.Shutdown();
     xamlHost_.Shutdown();
 
@@ -474,20 +451,14 @@ void MainWindow::OnDpiChanged(WPARAM wParam, LPARAM lParam)
     // Skip redundant layout cycles if we have already preset this DPI factor in ShowSwitcher.
     if (newDpi == dpi_)
     {
-        if (xamlHost_.ChildHwnd())
-        {
-            SendMessageW(xamlHost_.ChildHwnd(), WM_DPICHANGED, wParam, lParam);
-        }
+        ForwardDpiChangeToChild(wParam, lParam);
         return;
     }
 
     dpi_ = newDpi;
     coordinates_.SetDpi(dpi_);
 
-    if (xamlHost_.ChildHwnd())
-    {
-        SendMessageW(xamlHost_.ChildHwnd(), WM_DPICHANGED, wParam, lParam);
-    }
+    ForwardDpiChangeToChild(wParam, lParam);
 
     const bool wasSyncing = isSyncingLayout_;
     isSyncingLayout_ = true;
@@ -530,7 +501,6 @@ void MainWindow::RefreshTheme()
     {
         appSwitcherMainView_.ApplyTheme(themeManager_.Palette());
     }
-    UpdateTransparentRegion();
 }
 
 void MainWindow::SyncClientLayout(UINT width, UINT height, bool renderSwitcher)
@@ -545,7 +515,6 @@ void MainWindow::SyncClientLayout(UINT width, UINT height, bool renderSwitcher)
     {
         appSwitcherMainView_.Resize(width, height, coordinates_.Scale());
     }
-    UpdateTransparentRegion();
 }
 
 void MainWindow::RebaseActiveDrag()
@@ -553,14 +522,12 @@ void MainWindow::RebaseActiveDrag()
     inputController_.RebaseActiveDrag(hwnd_, appSwitcherMainView_.DragPosition(), coordinates_);
 }
 
-void MainWindow::UpdateTransparentRegion()
+void MainWindow::ForwardDpiChangeToChild(WPARAM wParam, LPARAM lParam)
 {
-    if (!hwnd_)
+    if (xamlHost_.ChildHwnd())
     {
-        return;
+        SendMessageW(xamlHost_.ChildHwnd(), WM_DPICHANGED, wParam, lParam);
     }
-
-    SetWindowRgn(hwnd_, nullptr, TRUE);
 }
 
 void MainWindow::ShowSwitcher()
@@ -569,6 +536,8 @@ void MainWindow::ShowSwitcher()
     {
         return;
     }
+
+    appSwitcherMainView_.ResetSelection();
 
     isSyncingLayout_ = true;
 
@@ -591,12 +560,9 @@ void MainWindow::ShowSwitcher()
     const int width = windowRect.right - windowRect.left;
     const int height = windowRect.bottom - windowRect.top;
 
-    if (xamlHost_.ChildHwnd())
-    {
-        const WPARAM wp = MAKEWPARAM(static_cast<WORD>(dpi_), static_cast<WORD>(dpi_));
-        RECT childSuggestedRect{0, 0, width, height};
-        SendMessageW(xamlHost_.ChildHwnd(), WM_DPICHANGED, wp, reinterpret_cast<LPARAM>(&childSuggestedRect));
-    }
+    const WPARAM wp = MAKEWPARAM(static_cast<WORD>(dpi_), static_cast<WORD>(dpi_));
+    RECT childSuggestedRect{0, 0, width, height};
+    ForwardDpiChangeToChild(wp, reinterpret_cast<LPARAM>(&childSuggestedRect));
 
     SyncClientLayout(width, height, true);
     RefreshTheme();
@@ -649,6 +615,51 @@ void MainWindow::HandleInputResult(const InputController::Result& result)
     if (result.positionChanged || result.dragEnded)
     {
         appSwitcherMainView_.SetDragPosition(result.position);
+    }
+}
+
+void MainWindow::DispatchGestureAction(const InputController::RawInputResult& inputResult)
+{
+    if (inputResult.action == InputController::InputAction::ShowSwitcher)
+    {
+        if (touchrev::settings::g_IsSwitcherWindowEnabled)
+        {
+            ShowSwitcher();
+        }
+    }
+    else if (inputResult.action == InputController::InputAction::LongPressBegin)
+    {
+        if (touchrev::settings::g_IsSwitcherWindowEnabled)
+        {
+            ShowSwitcher();
+            isLongPressNavigating_ = true;
+            pendingLongPressActivation_ = false;
+            appSwitcherMainView_.ClearGestureAccumulator();
+        }
+    }
+    else if (inputResult.action == InputController::InputAction::LongPressMove)
+    {
+        if (isLongPressNavigating_ && isVisible_)
+        {
+            appSwitcherMainView_.AccumulateAndMoveSelection(inputResult.deltaX, inputResult.deltaY);
+        }
+    }
+    else if (inputResult.action == InputController::InputAction::LongPressEnd)
+    {
+        if (isLongPressNavigating_)
+        {
+            isLongPressNavigating_ = false;
+            pendingLongPressActivation_ = isVisible_;
+        }
+    }
+
+    if (pendingLongPressActivation_ && inputResult.allContactsReleased)
+    {
+        pendingLongPressActivation_ = false;
+        if (isVisible_)
+        {
+            appSwitcherMainView_.ActivateSelectedItem();
+        }
     }
 }
 

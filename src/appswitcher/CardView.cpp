@@ -3,6 +3,10 @@
 #include "LayoutEngine.h"
 #include "common/FileUtils.h"
 #include "common/PathUtils.h"
+#include "common/IconUtils.h"
+
+#include <winrt/Windows.UI.Xaml.Media.Imaging.h>
+#include <winrt/Windows.Graphics.Imaging.h>
 
 #ifdef GetCurrentTime
 #undef GetCurrentTime
@@ -21,7 +25,9 @@
 
 
 
+#include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <sstream>
 #include <utility>
 
@@ -31,8 +37,6 @@ winrt::Windows::UI::Xaml::Media::SolidColorBrush Brush(winrt::Windows::UI::Color
 {
     return winrt::Windows::UI::Xaml::Media::SolidColorBrush(color);
 }
-
-
 
 void ApplyContentClip(winrt::Windows::UI::Xaml::FrameworkElement const& element, double width, double height)
 {
@@ -101,6 +105,7 @@ bool CardView::Initialize(
         titleBorder = root.FindName(L"TitleBorder").as<winrt::Windows::UI::Xaml::Controls::Border>();
         title = root.FindName(L"TitleText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
         defaultIcon = root.FindName(L"DefaultIcon").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
+        appIcon = root.FindName(L"AppIcon").as<winrt::Windows::UI::Xaml::Controls::Image>();
         closeButton = root.FindName(L"CloseButton").as<winrt::Windows::UI::Xaml::Controls::Button>();
         thumbnailHost = root.FindName(L"ContentFrame").as<winrt::Windows::UI::Xaml::Controls::Border>();
         pressOverlay = root.FindName(L"PressOverlay").as<winrt::Windows::UI::Xaml::Controls::Border>();
@@ -111,12 +116,12 @@ bool CardView::Initialize(
 
         root.PointerEntered([this](auto const&, auto const&) {
             hovered = true;
-            ApplyInteractionState(palette_);
+            UpdateVisualState();
         });
 
         root.PointerExited([this](auto const&, auto const&) {
             hovered = false;
-            ApplyInteractionState(palette_);
+            UpdateVisualState();
         });
 
 
@@ -129,10 +134,12 @@ bool CardView::Initialize(
                 }
             });
             closeButton.PointerEntered([this](auto const&, auto const&) {
-                ApplyCloseButtonHoverState(palette_, true);
+                closeButtonHovered = true;
+                UpdateVisualState();
             });
             closeButton.PointerExited([this](auto const&, auto const&) {
-                ApplyCloseButtonHoverState(palette_, false);
+                closeButtonHovered = false;
+                UpdateVisualState();
             });
         }
 
@@ -235,9 +242,15 @@ void CardView::ApplyTheme(const AppSwitcherPalette& palette)
 
 void CardView::ApplyInteractionState(const AppSwitcherPalette& palette)
 {
+    palette_ = palette;
+    UpdateVisualState();
+}
+
+void CardView::UpdateVisualState()
+{
     if (titleBorder)
     {
-        titleBorder.Background(Brush(hovered ? palette.titleHoverBackground : palette.titleBackground));
+        titleBorder.Background(Brush(hovered ? palette_.titleHoverBackground : palette_.titleBackground));
     }
 
     if (pressOverlay)
@@ -245,8 +258,8 @@ void CardView::ApplyInteractionState(const AppSwitcherPalette& palette)
         if (grabbed || pressed)
         {
             const auto overlayColor = grabbed
-                                          ? palette.cardGrabbedOverlay
-                                          : palette.cardPressedOverlay;
+                                          ? palette_.cardGrabbedOverlay
+                                          : palette_.cardPressedOverlay;
             pressOverlay.Background(Brush(overlayColor));
             pressOverlay.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
         }
@@ -262,17 +275,12 @@ void CardView::ApplyInteractionState(const AppSwitcherPalette& palette)
         transform.ScaleX(scale);
         transform.ScaleY(scale);
     }
-}
 
-void CardView::ApplyCloseButtonHoverState(const AppSwitcherPalette& palette, bool isHovered)
-{
-    if (!closeButton)
+    if (closeButton)
     {
-        return;
+        closeButton.Background(Brush(closeButtonHovered ? palette_.closeButtonHoverBackground : winrt::Windows::UI::Colors::Transparent()));
+        closeButton.Foreground(Brush(closeButtonHovered ? palette_.closeButtonHoverText : palette_.buttonText));
     }
-
-    closeButton.Background(Brush(isHovered ? palette.closeButtonHoverBackground : winrt::Windows::UI::Colors::Transparent()));
-    closeButton.Foreground(Brush(isHovered ? palette.closeButtonHoverText : palette.buttonText));
 }
 
 void CardView::ClearThumbnail()
@@ -302,8 +310,17 @@ void CardView::Reset(const AppSwitcherPalette& palette)
     hovered = false;
     pressed = false;
     grabbed = false;
-    ApplyInteractionState(palette);
-    ApplyCloseButtonHoverState(palette, false);
+    closeButtonHovered = false;
+    if (appIcon)
+    {
+        appIcon.Source(nullptr);
+        appIcon.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+    }
+    if (defaultIcon)
+    {
+        defaultIcon.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+    }
+    UpdateVisualState();
 }
 
 void CardView::SetRootVisibility(bool isVisible)
@@ -324,7 +341,11 @@ void CardView::AssignWindow(HWND newHwnd)
     {
         ClearThumbnail();
     }
-    hwnd = newHwnd;
+    if (hwnd != newHwnd)
+    {
+        hwnd = newHwnd;
+        LoadAppIcon();
+    }
 }
 
 void CardView::ApplyTitle(const std::wstring& titleText, size_t fallbackOrdinal)
@@ -419,6 +440,7 @@ void CardView::Destroy()
     titleBorder = nullptr;
     title = nullptr;
     defaultIcon = nullptr;
+    appIcon = nullptr;
     closeButton = nullptr;
     thumbnailHost = nullptr;
     pressOverlay = nullptr;
@@ -456,6 +478,35 @@ void CardView::UpdateState(
         1.0,
         h * LayoutEngine::ContentRowWeight / LayoutEngine::TotalRowWeight);
     EnsureThumbnail(thumbnailManager, thumbnailWidth, thumbnailHeight, dpiScale);
+}
+
+void CardView::LoadAppIcon()
+{
+    if (!appIcon || !defaultIcon)
+    {
+        return;
+    }
+
+    if (!hwnd)
+    {
+        appIcon.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+        defaultIcon.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+        return;
+    }
+
+    auto source = touchrev::common::icon::GetWindowIcon(hwnd);
+
+    if (source)
+    {
+        appIcon.Source(source);
+        appIcon.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+        defaultIcon.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+    }
+    else
+    {
+        appIcon.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+        defaultIcon.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+    }
 }
 }
 

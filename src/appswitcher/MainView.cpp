@@ -943,6 +943,11 @@ void MainView::ClearGestureAccumulator()
     gestureAccX_ = 0.0;
     gestureAccY_ = 0.0;
 }
+
+void MainView::ResetSelection()
+{
+    selectedItemIndex_ = static_cast<size_t>(-1);
+}
 }
 
 
