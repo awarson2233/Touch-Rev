@@ -21,14 +21,19 @@ bool IsShellRoutingWindow(HWND hwnd) {
            WindowClassEquals(hwnd, kClassWorkerW);
 }
 
-bool ShouldBlockThreeFingerLongPressSignal(HWND hwnd, UINT msg) {
-    return msg == kShellTrayThreeFingerLongPressMessage &&
-           WindowClassEquals(hwnd, kClassShellTrayWnd);
+bool IsShellMultitaskingStateQuery(UINT msg, WPARAM wParam, LPARAM lParam) {
+    return msg == kShellTrayThreeFingerLongPressMessage && wParam == 0 &&
+           lParam == 0;
 }
 
-bool ShouldBlockThreeFingerSwipeDownSignal(HWND hwnd, UINT msg, WPARAM wParam) {
-    return msg == kShellTrayWindowManagerMessage &&
-           wParam == 3 &&
+bool ShouldBlockThreeFingerLongPressSignal(HWND hwnd,
+                                           UINT msg,
+                                           WPARAM wParam,
+                                           LPARAM lParam,
+                                           bool allowShellMultitaskingStateQuery) {
+    return msg == kShellTrayThreeFingerLongPressMessage &&
+           !(allowShellMultitaskingStateQuery &&
+             IsShellMultitaskingStateQuery(msg, wParam, lParam)) &&
            WindowClassEquals(hwnd, kClassShellTrayWnd);
 }
 
@@ -99,21 +104,16 @@ bool ShouldBlockMessage(HWND hwnd,
                         UINT msg,
                         WPARAM wParam,
                         LPARAM lParam,
+                        bool allowShellMultitaskingStateQuery,
                         PCWSTR* reason) {
     if (reason) {
         *reason = L"";
     }
 
-    if (ShouldBlockThreeFingerLongPressSignal(hwnd, msg)) {
+    if (ShouldBlockThreeFingerLongPressSignal(hwnd, msg, wParam, lParam,
+                                             allowShellMultitaskingStateQuery)) {
         if (reason) {
             *reason = L"Shell_TrayWnd 0x05C6 three-finger long-press action";
-        }
-        return true;
-    }
-
-    if (ShouldBlockThreeFingerSwipeDownSignal(hwnd, msg, wParam)) {
-        if (reason) {
-            *reason = L"Shell_TrayWnd 0x0579 wParam=3 three-finger swipe-down";
         }
         return true;
     }
@@ -138,10 +138,11 @@ bool ShouldBlockMessage(HWND hwnd,
 void ActivateFollowUpBlockers(HWND hwnd,
                               UINT msg,
                               WPARAM wParam,
-                              LPARAM /*lParam*/,
+                              LPARAM lParam,
+                              bool allowShellMultitaskingStateQuery,
                               PCWSTR reason) {
-    if (ShouldBlockThreeFingerLongPressSignal(hwnd, msg) ||
-        ShouldBlockThreeFingerSwipeDownSignal(hwnd, msg, wParam)) {
+    if (ShouldBlockThreeFingerLongPressSignal(hwnd, msg, wParam, lParam,
+                                             allowShellMultitaskingStateQuery)) {
         StartRecentTaskSwitcherBlockWindow(reason);
     }
 }

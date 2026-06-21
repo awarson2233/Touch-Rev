@@ -19,6 +19,7 @@ bool ShouldBlockMessage(HWND hwnd,
                         UINT msg,
                         WPARAM wParam,
                         LPARAM lParam,
+                        bool allowShellMultitaskingStateQuery,
                         PCWSTR* reason);
 bool ShouldBlockDirectAppThumbnailWindow(HWND hwnd);
 bool ShouldBlockForegroundCommitWindow(HWND hwnd);
@@ -27,6 +28,7 @@ void ActivateFollowUpBlockers(HWND hwnd,
                               UINT msg,
                               WPARAM wParam,
                               LPARAM lParam,
+                              bool allowShellMultitaskingStateQuery,
                               PCWSTR reason);
 void HideAppThumbnailWindow(HWND hwnd,
                             PCWSTR reason,

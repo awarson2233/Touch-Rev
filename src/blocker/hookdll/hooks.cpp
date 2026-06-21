@@ -1,5 +1,6 @@
 #include "hookdll/hooks.h"
 
+#include "common/constants.h"
 #include "common/log.h"
 #include "common/winutil.h"
 #include "hookdll/direct_hook_resolver.h"
@@ -8,8 +9,10 @@
 
 #include <detours.h>
 #include <windows.h>
+#include <intrin.h>
 
 #include <atomic>
+#include <cstdint>
 
 namespace touchrev {
 namespace {
@@ -42,7 +45,18 @@ BringWindowToTopFn BringWindowToTop_Original = ::BringWindowToTop;
 SwitchToThisWindowFn SwitchToThisWindow_Original = nullptr;
 
 std::atomic_bool g_hooksInstalled{false};
+std::atomic_bool g_multitaskingStateQueryResolved{false};
+std::atomic<void*> g_multitaskingStateQueryAddress{nullptr};
 thread_local bool g_inHook = false;
+
+constexpr wchar_t kTwinuiPcshellModuleName[] = L"twinui.pcshell.dll";
+constexpr wchar_t kMultitaskingViewStateQueryName[] =
+    L"MultitaskingViewGestureHandler::GetMultitaskingViewState";
+constexpr std::uintptr_t kMultitaskingViewStateQueryMaxBytes = 0x200;
+constexpr std::uintptr_t kMultitaskingViewStateQuerySendMessageReturnRvas[] = {
+    0x16192C,
+    0xA9E6F4,
+};
 
 struct HookReentryScope {
     HookReentryScope() { g_inHook = true; }
@@ -67,16 +81,116 @@ SwitchToThisWindowFn ResolveSwitchToThisWindow() {
     return reinterpret_cast<SwitchToThisWindowFn>(target.address);
 }
 
+void* ResolveMultitaskingViewStateQueryAddress() {
+    if (!g_multitaskingStateQueryResolved.exchange(true)) {
+        DirectHookSpec spec{};
+        spec.moduleName = kTwinuiPcshellModuleName;
+        spec.displayName = kMultitaskingViewStateQueryName;
+        spec.symbolName = kMultitaskingViewStateQueryName;
+        spec.optional = true;
+        spec.requireExecutableAddress = true;
+
+        DirectHookTarget target{};
+        if (ResolveDirectHookTarget(spec, &target)) {
+            g_multitaskingStateQueryAddress.store(target.address,
+                                                  std::memory_order_release);
+            LogMessage(L"hookdll", LogLevel::Info,
+                       L"event=MULTITASKING_STATE_QUERY_RESOLVED addr=0x%p rva=0x%Ix",
+                       target.address, target.rva);
+        } else {
+            LogMessage(L"hookdll", LogLevel::Warning,
+                       L"event=MULTITASKING_STATE_QUERY_RESOLVE_FAILED");
+        }
+    }
+
+    return g_multitaskingStateQueryAddress.load(std::memory_order_acquire);
+}
+
+bool TryComputeTwinuiRva(void* address, std::uintptr_t* rva) {
+    if (rva) {
+        *rva = 0;
+    }
+    if (!address) {
+        return false;
+    }
+
+    HMODULE twinui = GetModuleHandleW(kTwinuiPcshellModuleName);
+    if (!twinui) {
+        return false;
+    }
+
+    std::uintptr_t base = reinterpret_cast<std::uintptr_t>(twinui);
+    std::uintptr_t current = reinterpret_cast<std::uintptr_t>(address);
+    if (current < base) {
+        return false;
+    }
+
+    if (rva) {
+        *rva = current - base;
+    }
+    return true;
+}
+
+bool IsReturnAddressAtKnownMultitaskingStateQueryCallsite(void* returnAddress) {
+    std::uintptr_t rva = 0;
+    if (!TryComputeTwinuiRva(returnAddress, &rva)) {
+        return false;
+    }
+
+    for (std::uintptr_t knownRva :
+         kMultitaskingViewStateQuerySendMessageReturnRvas) {
+        if (rva == knownRva) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool IsReturnAddressInMultitaskingViewStateQuery(void* returnAddress) {
+    if (!returnAddress) {
+        return false;
+    }
+
+    void* functionAddress = ResolveMultitaskingViewStateQueryAddress();
+    if (functionAddress) {
+        std::uintptr_t start = reinterpret_cast<std::uintptr_t>(functionAddress);
+        std::uintptr_t current = reinterpret_cast<std::uintptr_t>(returnAddress);
+        if (current >= start &&
+            current < start + kMultitaskingViewStateQueryMaxBytes) {
+            return true;
+        }
+    }
+
+    return IsReturnAddressAtKnownMultitaskingStateQueryCallsite(returnAddress);
+}
+
+bool ShouldAllowShellMultitaskingStateQuery(HWND hwnd,
+                                            UINT msg,
+                                            WPARAM wParam,
+                                            LPARAM lParam,
+                                            void* returnAddress) {
+    return msg == kShellTrayThreeFingerLongPressMessage && wParam == 0 &&
+           lParam == 0 && WindowClassEquals(hwnd, kClassShellTrayWnd) &&
+           IsReturnAddressInMultitaskingViewStateQuery(returnAddress);
+}
+
 LRESULT WINAPI SendMessageW_Hook(HWND hwnd,
                                  UINT msg,
                                  WPARAM wParam,
                                  LPARAM lParam) {
+    void* returnAddress = _ReturnAddress();
     if (!g_inHook) {
         {
             HookReentryScope scope;
+            bool allowShellMultitaskingStateQuery =
+                ShouldAllowShellMultitaskingStateQuery(hwnd, msg, wParam, lParam,
+                                                       returnAddress);
             PCWSTR reason = L"";
-            if (ShouldBlockMessage(hwnd, msg, wParam, lParam, &reason)) {
-                ActivateFollowUpBlockers(hwnd, msg, wParam, lParam, reason);
+            if (ShouldBlockMessage(hwnd, msg, wParam, lParam,
+                                   allowShellMultitaskingStateQuery, &reason)) {
+                ActivateFollowUpBlockers(hwnd, msg, wParam, lParam,
+                                         allowShellMultitaskingStateQuery, reason);
                 HideMessageWindows(hwnd, lParam, L"SendMessageW",
                                    ShowWindow_Original, SetWindowPos_Original);
                 LogBlockedMessage(L"SendMessageW", hwnd, msg, wParam, lParam,
@@ -97,8 +211,8 @@ BOOL WINAPI PostMessageW_Hook(HWND hwnd,
         {
             HookReentryScope scope;
             PCWSTR reason = L"";
-            if (ShouldBlockMessage(hwnd, msg, wParam, lParam, &reason)) {
-                ActivateFollowUpBlockers(hwnd, msg, wParam, lParam, reason);
+            if (ShouldBlockMessage(hwnd, msg, wParam, lParam, false, &reason)) {
+                ActivateFollowUpBlockers(hwnd, msg, wParam, lParam, false, reason);
                 HideMessageWindows(hwnd, lParam, L"PostMessageW",
                                    ShowWindow_Original, SetWindowPos_Original);
                 LogBlockedMessage(L"PostMessageW", hwnd, msg, wParam, lParam,
@@ -121,8 +235,8 @@ BOOL WINAPI SendMessageCallbackW_Hook(HWND hwnd,
         {
             HookReentryScope scope;
             PCWSTR reason = L"";
-            if (ShouldBlockMessage(hwnd, msg, wParam, lParam, &reason)) {
-                ActivateFollowUpBlockers(hwnd, msg, wParam, lParam, reason);
+            if (ShouldBlockMessage(hwnd, msg, wParam, lParam, false, &reason)) {
+                ActivateFollowUpBlockers(hwnd, msg, wParam, lParam, false, reason);
                 HideMessageWindows(hwnd, lParam, L"SendMessageCallbackW",
                                    ShowWindow_Original, SetWindowPos_Original);
                 LogBlockedMessage(L"SendMessageCallbackW", hwnd, msg, wParam,
