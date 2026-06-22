@@ -25,7 +25,7 @@ public:
 
     bool Initialize(HINSTANCE instance, int showCommand);
     int Run();
-    void ShowSwitcher();
+    void ShowSwitcher(const POINT* touchCenter = nullptr);
     void Hide();
     void ToggleSwitcher();
     void ExitApplication();
@@ -47,7 +47,7 @@ private:
     void HandleInputResult(const InputController::Result& result);
     void DispatchGestureAction(const InputController::RawInputResult& inputResult);
     bool HandleKeyDown(WPARAM key);
-    HMONITOR ResolveTargetMonitor() const;
+    HMONITOR ResolveTargetMonitor(const POINT* touchCenter = nullptr) const;
     MONITORINFO LoadMonitorInfo(HMONITOR monitor) const;
 
     bool CanStartDragFromPointer(WPARAM wParam) const;

@@ -1,13 +1,16 @@
 #include "input/gesture/ThreeFingerGestureRecognizer.h"
 
+#include "common/Win32Error.h"
+
 #include <windows.h>
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 
 namespace
 {
-constexpr double kMaxFingerDistance = 600.0;
+constexpr double kMaxFingerDistance = 800.0;
 constexpr double kLongPressThresholdMs = 400.0;
 constexpr double kTapMoveThreshold = 30.0;
 constexpr double kMoveEpsilon = 0.1;
@@ -25,6 +28,14 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
     const bool threeFingerActive = TryExtractThreeFingers(fingers);
     const std::int64_t now = CounterNow();
 
+    // 缓存原始触摸坐标（用于 Tick 触发时计算触摸中心）
+    if (threeFingerActive)
+    {
+        lastRawCenterX_ = static_cast<LONG>((fingers[0].point.x + fingers[1].point.x + fingers[2].point.x) / 3.0 * 10.0);
+        lastRawCenterY_ = static_cast<LONG>((fingers[0].point.y + fingers[1].point.y + fingers[2].point.y) / 3.0 * 10.0);
+        hasLastRawCenter_ = true;
+    }
+
     if (!threeFingerActive)
     {
         if (state_ == State::Candidate)
@@ -37,6 +48,50 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
 
         if (state_ == State::LongPressActive)
         {
+            // 降级容错：检查是否是临时 ID 断开（仍有 2+ 个原始 ID 的手指）
+            if (PartiallyMatchesCandidateIds() && activeFingers_.size() >= 2)
+            {
+                // 使用剩余手指的中心继续跟踪（降级模式）
+                Point center = CalculateCenterFromActive();
+
+                // 更新缓存的原始坐标
+                lastRawCenterX_ = 0;
+                lastRawCenterY_ = 0;
+                for (const auto& finger : activeFingers_)
+                {
+                    lastRawCenterX_ += static_cast<LONG>(finger.point.x * 10.0);
+                    lastRawCenterY_ += static_cast<LONG>(finger.point.y * 10.0);
+                }
+                lastRawCenterX_ /= static_cast<LONG>(activeFingers_.size());
+                lastRawCenterY_ /= static_cast<LONG>(activeFingers_.size());
+                hasLastRawCenter_ = true;
+
+                const Point frameDelta{center.x - lastCenter_.x, center.y - lastCenter_.y};
+                const EventType type = std::hypot(frameDelta.x, frameDelta.y) >= kMoveEpsilon
+                                           ? EventType::LongPressMoved
+                                           : EventType::LongPressHolding;
+                lastCenter_ = center;
+
+                std::wstringstream log;
+                log << L"[Gesture] Degraded mode: tracking with " << activeFingers_.size() << L" fingers";
+                DebugLog(log.str());
+
+                // 构造虚拟的 3 指数组（用于兼容 MakeResult）
+                std::array<FingerPoint, 3> degradedFingers{};
+                for (size_t i = 0; i < std::min(activeFingers_.size(), size_t(3)); ++i)
+                {
+                    degradedFingers[i] = activeFingers_[i];
+                }
+
+                return MakeResult(type, true, true, center, frameDelta, {}, degradedFingers);
+            }
+
+            // 真正终止：手指完全消失或出现不匹配的新 ID
+            std::wstringstream log;
+            log << L"[Gesture] LongPress ended: finger count=" << activeFingers_.size()
+                << L" partialMatch=" << (PartiallyMatchesCandidateIds() ? L"true" : L"false");
+            DebugLog(log.str());
+
             state_ = State::Idle;
             hasCandidateIds_ = false;
             return MakeResult(EventType::LongPressEnded, false, false, lastCenter_, {}, {}, fingers);
@@ -56,6 +111,10 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
     {
         if (state_ == State::LongPressActive)
         {
+            std::wstringstream log;
+            log << L"[Gesture] LongPress ended: hand spread too wide. Max distance: " << distances.max << L" (limit: 800)";
+            DebugLog(log.str());
+
             state_ = State::Idle;
             hasCandidateIds_ = false;
             return MakeResult(EventType::LongPressEnded, true, false, center, {}, distances, fingers);
@@ -78,6 +137,16 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
 
     if (!MatchesCandidateIds(fingers))
     {
+        std::wstringstream log;
+        log << L"[Gesture] ID mismatch, resetting state. Current IDs: "
+            << fingers[0].id << L", " << fingers[1].id << L", " << fingers[2].id;
+        if (hasCandidateIds_)
+        {
+            log << L" Expected: " << candidateIds_[0] << L", " << candidateIds_[1] << L", " << candidateIds_[2];
+        }
+        log << L" State: " << static_cast<int>(state_);
+        DebugLog(log.str());
+
         state_ = State::Candidate;
         StoreCandidateIds(fingers);
         candidateStartQpc_ = now;
@@ -117,12 +186,17 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
         {
             if (distFromAnchor <= kMaxStartMovement * 1.5)
             {
+                DebugLog(L"[Gesture] LongPressStarted triggered");
                 state_ = State::LongPressActive;
                 lastCenter_ = center;
                 return MakeResult(EventType::LongPressStarted, true, true, center, {0.0, 0.0}, distances, fingers);
             }
             else
             {
+                std::wstringstream log;
+                log << L"[Gesture] Movement too large for long press: " << distFromAnchor << L" (limit: " << (kMaxStartMovement * 1.5) << L")";
+                DebugLog(log.str());
+
                 state_ = State::Tracking;
                 lastCenter_ = center;
                 return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
@@ -196,6 +270,9 @@ void ThreeFingerGestureRecognizer::Reset()
     lastFingers_ = {};
     lastThreeFingerActive_ = false;
     lastSameHand_ = false;
+    lastRawCenterX_ = 0;
+    lastRawCenterY_ = 0;
+    hasLastRawCenter_ = false;
     hasFirstTap_ = false;
     firstTapQpc_ = 0;
     firstTapCenter_ = {};
@@ -338,7 +415,80 @@ bool ThreeFingerGestureRecognizer::MatchesCandidateIds(const std::array<FingerPo
     auto expected = candidateIds_;
     std::sort(current.begin(), current.end());
     std::sort(expected.begin(), expected.end());
-    return current == expected;
+
+    // 精确匹配
+    if (current == expected)
+    {
+        return true;
+    }
+
+    // 容错模式：允许最多 1 个 ID 变化（应对硬件报告不稳定）
+    // 统计不匹配的 ID 数量
+    int mismatchCount = 0;
+    for (size_t i = 0; i < 3; ++i)
+    {
+        if (std::find(expected.begin(), expected.end(), current[i]) == expected.end())
+        {
+            ++mismatchCount;
+        }
+    }
+
+    // 如果只有 1 个 ID 变化，且处于长按状态，则容忍并继续跟踪
+    if (mismatchCount <= 1 && state_ == State::LongPressActive)
+    {
+        std::wstringstream log;
+        log << L"[Gesture] ID tolerance: mismatchCount=" << mismatchCount
+            << L" current=[" << current[0] << L"," << current[1] << L"," << current[2] << L"]"
+            << L" expected=[" << expected[0] << L"," << expected[1] << L"," << expected[2] << L"]";
+        DebugLog(log.str());
+        return true;
+    }
+
+    return false;
+}
+
+bool ThreeFingerGestureRecognizer::PartiallyMatchesCandidateIds() const
+{
+    if (!hasCandidateIds_ || activeFingers_.empty())
+    {
+        return false;
+    }
+
+    // 至少需要 2 个手指
+    if (activeFingers_.size() < 2)
+    {
+        return false;
+    }
+
+    // 所有当前活动的手指 ID 都必须在原始候选 ID 集合中
+    for (const auto& finger : activeFingers_)
+    {
+        if (std::find(candidateIds_.begin(), candidateIds_.end(), finger.id) == candidateIds_.end())
+        {
+            return false;  // 发现不属于原始 ID 的新手指
+        }
+    }
+
+    return true;
+}
+
+ThreeFingerGestureRecognizer::Point ThreeFingerGestureRecognizer::CalculateCenterFromActive() const
+{
+    if (activeFingers_.empty())
+    {
+        return {};
+    }
+
+    double sumX = 0.0;
+    double sumY = 0.0;
+    for (const auto& finger : activeFingers_)
+    {
+        sumX += finger.point.x;
+        sumY += finger.point.y;
+    }
+
+    return {sumX / static_cast<double>(activeFingers_.size()),
+            sumY / static_cast<double>(activeFingers_.size())};
 }
 
 void ThreeFingerGestureRecognizer::StoreCandidateIds(const std::array<FingerPoint, 3>& fingers)
@@ -379,6 +529,9 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::MakeResult(
         .activeIds = activeIds,
         .startIds = candidateIds_,
         .deltaValid = hasCandidateIds_,
+        .rawCenterX = lastRawCenterX_,
+        .rawCenterY = lastRawCenterY_,
+        .hasRawCenter = hasLastRawCenter_,
     };
 }
 

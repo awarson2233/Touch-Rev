@@ -46,6 +46,10 @@ public:
         std::array<DWORD, 3> activeIds{};
         std::array<DWORD, 3> startIds{};
         bool deltaValid = false;
+        // 触摸中心的原始屏幕坐标（0.1mm 单位），用于显示器定位
+        LONG rawCenterX = 0;
+        LONG rawCenterY = 0;
+        bool hasRawCenter = false;
     };
 
     Result ProcessFrame(const RawTouchInput::Frame& frame);
@@ -78,6 +82,8 @@ private:
     void UpdateActiveSnapshot(const RawTouchInput::Frame& frame);
     bool TryExtractThreeFingers(std::array<FingerPoint, 3>& fingers) const;
     bool MatchesCandidateIds(const std::array<FingerPoint, 3>& fingers) const;
+    bool PartiallyMatchesCandidateIds() const;
+    Point CalculateCenterFromActive() const;
     void StoreCandidateIds(const std::array<FingerPoint, 3>& fingers);
     Result MakeResult(EventType type, bool active, bool sameHand, Point center, Point delta, Distances distances, const std::array<FingerPoint, 3>& fingers);
     Result FinishCandidateTap(Point center, Distances distances, const std::array<FingerPoint, 3>& fingers);
@@ -95,6 +101,10 @@ private:
     std::array<FingerPoint, 3> lastFingers_{};
     bool lastThreeFingerActive_ = false;
     bool lastSameHand_ = false;
+    // 缓存最后有效的原始触摸坐标（用于 Tick 触发时计算触摸中心）
+    LONG lastRawCenterX_ = 0;
+    LONG lastRawCenterY_ = 0;
+    bool hasLastRawCenter_ = false;
 
     bool hasFirstTap_ = false;
     std::int64_t firstTapQpc_ = 0;

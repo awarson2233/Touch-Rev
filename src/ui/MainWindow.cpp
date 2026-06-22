@@ -5,6 +5,7 @@
 #include "common/AppSettings.h"
 
 #include <algorithm>
+#include <sstream>
 #include <vector>
 #include <windowsx.h>
 
@@ -530,7 +531,7 @@ void MainWindow::ForwardDpiChangeToChild(WPARAM wParam, LPARAM lParam)
     }
 }
 
-void MainWindow::ShowSwitcher()
+void MainWindow::ShowSwitcher(const POINT* touchCenter)
 {
     if (!hwnd_)
     {
@@ -541,7 +542,7 @@ void MainWindow::ShowSwitcher()
 
     isSyncingLayout_ = true;
 
-    targetMonitor_ = ResolveTargetMonitor();
+    targetMonitor_ = ResolveTargetMonitor(touchCenter);
     const MONITORINFO monitorInfo = LoadMonitorInfo(targetMonitor_);
     targetMonitorRectPx_ = monitorInfo.rcMonitor;
     targetWorkAreaPx_ = monitorInfo.rcWork;
@@ -624,14 +625,16 @@ void MainWindow::DispatchGestureAction(const InputController::RawInputResult& in
     {
         if (touchrev::settings::g_IsSwitcherWindowEnabled)
         {
-            ShowSwitcher();
+            const POINT* touchCenter = inputResult.hasTouchCenter ? &inputResult.touchCenterScreen : nullptr;
+            ShowSwitcher(touchCenter);
         }
     }
     else if (inputResult.action == InputController::InputAction::LongPressBegin)
     {
         if (touchrev::settings::g_IsSwitcherWindowEnabled)
         {
-            ShowSwitcher();
+            const POINT* touchCenter = inputResult.hasTouchCenter ? &inputResult.touchCenterScreen : nullptr;
+            ShowSwitcher(touchCenter);
             isLongPressNavigating_ = true;
             pendingLongPressActivation_ = false;
             appSwitcherMainView_.ClearGestureAccumulator();
@@ -698,14 +701,31 @@ bool MainWindow::HandleKeyDown(WPARAM key)
     return false;
 }
 
-HMONITOR MainWindow::ResolveTargetMonitor() const
+HMONITOR MainWindow::ResolveTargetMonitor(const POINT* touchCenter) const
 {
+    // 优先使用触摸中心坐标（来自三指手势的实际触摸位置）
+    if (touchCenter)
+    {
+        HMONITOR monitor = MonitorFromPoint(*touchCenter, MONITOR_DEFAULTTONEAREST);
+        if (monitor)
+        {
+            std::wstringstream log;
+            log << L"[ResolveTargetMonitor] Using touchCenter=(" << touchCenter->x << L", " << touchCenter->y << L") monitor=" << monitor;
+            DebugLog(log.str());
+            return monitor;
+        }
+    }
+
+    // Fallback 到鼠标位置（保持向后兼容，用于非触摸场景）
     POINT cursor{};
     if (GetCursorPos(&cursor))
     {
         HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
         if (monitor)
         {
+            std::wstringstream log;
+            log << L"[ResolveTargetMonitor] Using cursor=(" << cursor.x << L", " << cursor.y << L") monitor=" << monitor;
+            DebugLog(log.str());
             return monitor;
         }
     }
@@ -716,10 +736,12 @@ HMONITOR MainWindow::ResolveTargetMonitor() const
         HMONITOR monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST);
         if (monitor)
         {
+            DebugLog(L"[ResolveTargetMonitor] Using foreground window monitor");
             return monitor;
         }
     }
 
+    DebugLog(L"[ResolveTargetMonitor] Using primary monitor fallback");
     return MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
 }
 

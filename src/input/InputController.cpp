@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <sstream>
 #include <vector>
 
 namespace
@@ -328,16 +329,102 @@ InputController::RawInputResult InputController::MapGestureEvent(
 
     if (gestureResult.type == EventType::DoubleTap)
     {
-        return {.handled = true, .action = InputAction::ShowSwitcher, .allContactsReleased = allContactsReleased};
+        // 双击时也计算触摸中心，用于显示器定位
+        POINT touchCenter{};
+        bool hasTouchCenter = false;
+        if (frame && frame->contactCount > 0)
+        {
+            LONG sumX = 0;
+            LONG sumY = 0;
+            int activeCount = 0;
+            for (const RawTouchInput::TouchPoint& point : frame->points)
+            {
+                if (!point.active)
+                {
+                    continue;
+                }
+                sumX += point.x;
+                sumY += point.y;
+                ++activeCount;
+            }
+            if (activeCount > 0)
+            {
+                touchCenter.x = sumX / activeCount;
+                touchCenter.y = sumY / activeCount;
+                hasTouchCenter = true;
+            }
+        }
+        return {
+            .handled = true,
+            .action = InputAction::ShowSwitcher,
+            .allContactsReleased = allContactsReleased,
+            .touchCenterScreen = touchCenter,
+            .hasTouchCenter = hasTouchCenter
+        };
     }
     else if (gestureResult.type == EventType::LongPressStarted)
     {
         // 旋转在手势开始时算一次并缓存，整段长按内复用，避免每帧查询显示配置。
+        // 同时计算触摸中心屏幕坐标，用于确定目标显示器。
+        POINT touchCenter{};
+        bool hasTouchCenter = false;
+
+        // 优先使用识别器缓存的原始坐标（支持 Tick 触发的场景）
+        if (gestureResult.hasRawCenter)
+        {
+            touchCenter.x = gestureResult.rawCenterX;
+            touchCenter.y = gestureResult.rawCenterY;
+            hasTouchCenter = true;
+
+            std::wstringstream log;
+            log << L"[TouchCenter] LongPressBegin (from recognizer cache): touchCenter=("
+                << touchCenter.x << L", " << touchCenter.y << L")";
+            DebugLog(log.str());
+        }
+        else if (frame && frame->contactCount > 0)
+        {
+            // Fallback: 从当前帧计算
+            LONG sumX = 0;
+            LONG sumY = 0;
+            int activeCount = 0;
+            for (const RawTouchInput::TouchPoint& point : frame->points)
+            {
+                if (!point.active)
+                {
+                    continue;
+                }
+                sumX += point.x;
+                sumY += point.y;
+                ++activeCount;
+            }
+            if (activeCount > 0)
+            {
+                touchCenter.x = sumX / activeCount;
+                touchCenter.y = sumY / activeCount;
+                hasTouchCenter = true;
+
+                std::wstringstream log;
+                log << L"[TouchCenter] LongPressBegin (from frame): contactCount=" << frame->contactCount
+                    << L" activeCount=" << activeCount
+                    << L" touchCenter=(" << touchCenter.x << L", " << touchCenter.y << L")";
+                DebugLog(log.str());
+            }
+        }
+
         const ScreenRotation rotation = frame
                                             ? GetDisplayRotationFromTouchFrame(*frame, hwnd_)
                                             : RotationFromMonitor(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST));
         cachedGestureRotation_ = static_cast<int>(rotation);
-        return {.handled = true, .action = InputAction::LongPressBegin, .allContactsReleased = allContactsReleased};
+        cachedGestureTouchCenter_ = touchCenter;
+        hasCachedGestureTouchCenter_ = hasTouchCenter;
+
+        return {
+            .handled = true,
+            .action = InputAction::LongPressBegin,
+            .allContactsReleased = allContactsReleased,
+            .touchCenterScreen = touchCenter,
+            .hasTouchCenter = hasTouchCenter
+        };
     }
     else if (gestureResult.type == EventType::LongPressMoved)
     {
@@ -376,6 +463,7 @@ InputController::RawInputResult InputController::MapGestureEvent(
     }
     else if (gestureResult.type == EventType::LongPressEnded)
     {
+        hasCachedGestureTouchCenter_ = false;
         return {.handled = true, .action = InputAction::LongPressEnd, .allContactsReleased = allContactsReleased};
     }
 

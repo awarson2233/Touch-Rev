@@ -36,6 +36,8 @@ public:
         double deltaX = 0.0;
         double deltaY = 0.0;
         bool allContactsReleased = false;
+        POINT touchCenterScreen = {};  // 触摸中心屏幕坐标（用于定位显示器）
+        bool hasTouchCenter = false;
     };
 
     void Initialize(HWND hwnd);
@@ -101,4 +103,7 @@ private:
     bool hasSmoothedVelocity_ = false;
     // 长按手势期间缓存的显示旋转（0/90/180/270 对应 0..3），在 LongPressBegin 计算一次。
     int cachedGestureRotation_ = 0;
+    // 长按手势开始时缓存的触摸中心屏幕坐标，用于确定目标显示器。
+    POINT cachedGestureTouchCenter_ = {};
+    bool hasCachedGestureTouchCenter_ = false;
 };
