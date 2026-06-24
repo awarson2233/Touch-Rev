@@ -578,8 +578,6 @@ MainWindow::ActivationResult MainWindow::TryActivateSwitcher()
         return result;
     }
 
-    BringWindowToTop(hwnd_);
-    ShowWindow(hwnd_, SW_SHOW);
     result.directSucceeded = SetForegroundWindow(hwnd_) != FALSE && GetForegroundWindow() == hwnd_;
     if (result.directSucceeded)
     {
@@ -588,34 +586,11 @@ MainWindow::ActivationResult MainWindow::TryActivateSwitcher()
     }
 
     result.actualForeground = GetForegroundWindow();
-    if (!result.directSucceeded && result.actualForeground && result.actualForeground != hwnd_)
-    {
-        const DWORD foregroundThreadId = GetWindowThreadProcessId(result.actualForeground, nullptr);
-        const DWORD currentThreadId = GetCurrentThreadId();
-        if (foregroundThreadId != currentThreadId && foregroundThreadId != 0)
-        {
-            result.attachAttempted = true;
-            result.attachSucceeded = AttachThreadInput(currentThreadId, foregroundThreadId, TRUE) != FALSE;
-            if (result.attachSucceeded)
-            {
-                BringWindowToTop(hwnd_);
-                ShowWindow(hwnd_, SW_SHOW);
-                SetForegroundWindow(hwnd_);
-                SetActiveWindow(hwnd_);
-                SetFocus(hwnd_);
-                AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
-            }
-        }
-    }
-
-    result.actualForeground = GetForegroundWindow();
     result.foreground = result.actualForeground == hwnd_;
 
     std::wstringstream log;
     log << L"[AppSwitcherActivation] foreground=" << result.foreground
         << L" direct=" << result.directSucceeded
-        << L" attachAttempted=" << result.attachAttempted
-        << L" attachSucceeded=" << result.attachSucceeded
         << L" actualForeground=" << result.actualForeground;
     DebugLog(log.str());
 

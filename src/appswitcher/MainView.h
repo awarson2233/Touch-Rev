@@ -14,6 +14,7 @@
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Xaml.Input.h>
+#include <winrt/Windows.UI.Composition.h>
 
 
 #include <functional>
@@ -76,6 +77,7 @@ private:
     bool initialized_ = false;
 
     winrt::Windows::UI::Xaml::Controls::Grid root_{nullptr};
+    winrt::Windows::UI::Xaml::Controls::Border appSwitcherBackdrop_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border appSwitcherContainer_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Canvas layoutCanvas_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border focusBorder_{nullptr};
@@ -105,6 +107,8 @@ private:
     std::function<bool(HWND)> itemCloseRequestedCallback_;
     std::vector<HWND> dismissedHwnds_;
     AppSwitcherPalette palette_{};
+    winrt::Windows::UI::Composition::SpriteVisual backdropVisual_{nullptr};
+    winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry roundedClip_{nullptr};
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
 
     double gestureAccX_ = 0.0;

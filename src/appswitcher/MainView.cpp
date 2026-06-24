@@ -39,22 +39,11 @@ winrt::Windows::UI::Xaml::Media::SolidColorBrush Brush(winrt::Windows::UI::Color
     return winrt::Windows::UI::Xaml::Media::SolidColorBrush(color);
 }
 
-winrt::Windows::UI::Xaml::Media::Brush AcrylicBrush(const AppSwitcherPalette& palette)
+winrt::Windows::UI::Xaml::Media::Brush TintBrush(const AppSwitcherPalette& palette)
 {
-    try
-    {
-        auto brush = winrt::Windows::UI::Xaml::Media::AcrylicBrush();
-        brush.BackgroundSource(winrt::Windows::UI::Xaml::Media::AcrylicBackgroundSource::HostBackdrop);
-        brush.TintColor(palette.containerAcrylicTint);
-        brush.TintOpacity(palette.containerAcrylicTintOpacity);
-        brush.FallbackColor(palette.containerAcrylicFallback);
-        return brush;
-    }
-    catch (const winrt::hresult_error& error)
-    {
-        DebugLogHResult(L"Create AcrylicBrush", error.code());
-        return Brush(palette.containerAcrylicFallback);
-    }
+    auto color = palette.containerAcrylicTint;
+    color.A = static_cast<uint8_t>(color.A * palette.containerAcrylicTintOpacity);
+    return Brush(color);
 }
 }
 std::vector<ItemGeometry> MainView::GetItemGeometries() const
@@ -99,6 +88,7 @@ void MainView::Shutdown()
         item->Reset(palette_);
     }
     cards_.clear();
+    appSwitcherBackdrop_ = nullptr;
     appSwitcherContainer_ = nullptr;
     layoutCanvas_ = nullptr;
     focusBorder_ = nullptr;
@@ -108,6 +98,8 @@ void MainView::Shutdown()
     root_ = nullptr;
     host_ = nullptr;
     hwnd_ = nullptr;
+    backdropVisual_ = nullptr;
+    roundedClip_ = nullptr;
     initialized_ = false;
 }
 
@@ -349,7 +341,7 @@ void MainView::ApplyTheme(const AppSwitcherPalette& palette)
 
     if (appSwitcherContainer_)
     {
-        appSwitcherContainer_.Background(AcrylicBrush(palette_));
+        appSwitcherContainer_.Background(TintBrush(palette_));
         appSwitcherContainer_.BorderBrush(Brush(palette_.containerBorder));
     }
 
@@ -546,6 +538,27 @@ bool MainView::LoadRoot()
 
         auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
         root_ = object.as<winrt::Windows::UI::Xaml::Controls::Grid>();
+        appSwitcherBackdrop_ = root_.FindName(L"AppSwitcherBackdrop").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        if (appSwitcherBackdrop_)
+        {
+            auto hostVisual = winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::GetElementVisual(appSwitcherBackdrop_);
+            auto compositor = hostVisual.Compositor();
+            backdropVisual_ = compositor.CreateSpriteVisual();
+            backdropVisual_.Brush(compositor.CreateHostBackdropBrush());
+            try
+            {
+                roundedClip_ = compositor.CreateRoundedRectangleGeometry();
+                roundedClip_.CornerRadius({ 24.f, 24.f });
+                auto clip = compositor.CreateGeometricClip(roundedClip_);
+                backdropVisual_.Clip(clip);
+            }
+            catch (const winrt::hresult_error& error)
+            {
+                DebugLogHResult(L"Create rounded clip geometry", error.code());
+            }
+            winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(appSwitcherBackdrop_, backdropVisual_);
+        }
+
         appSwitcherContainer_ = root_.FindName(L"AppSwitcherContainer").as<winrt::Windows::UI::Xaml::Controls::Border>();
         layoutCanvas_ = root_.FindName(L"LayoutCanvas").as<winrt::Windows::UI::Xaml::Controls::Canvas>();
         focusBorder_ = root_.FindName(L"FocusBorder").as<winrt::Windows::UI::Xaml::Controls::Border>();
@@ -732,12 +745,33 @@ void MainView::UpdateVisibleBoundsAndPositions()
         layoutCanvas_.Height(visibleBoundsDip_.height);
     }
 
+    const float widthDip = contentBoundsDip_.width;
+    const float heightDip = contentBoundsDip_.height;
+
+    if (appSwitcherBackdrop_)
+    {
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(appSwitcherBackdrop_, contentOriginDip_.x);
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(appSwitcherBackdrop_, contentOriginDip_.y);
+        appSwitcherBackdrop_.Width(widthDip);
+        appSwitcherBackdrop_.Height(heightDip);
+    }
+
+    if (backdropVisual_)
+    {
+        backdropVisual_.Size({ widthDip, heightDip });
+    }
+
+    if (roundedClip_)
+    {
+        roundedClip_.Size({ widthDip, heightDip });
+    }
+
     if (appSwitcherContainer_)
     {
         winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(appSwitcherContainer_, contentOriginDip_.x);
         winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(appSwitcherContainer_, contentOriginDip_.y);
-        appSwitcherContainer_.Width(contentBoundsDip_.width);
-        appSwitcherContainer_.Height(contentBoundsDip_.height);
+        appSwitcherContainer_.Width(widthDip);
+        appSwitcherContainer_.Height(heightDip);
     }
 
     for (auto& item : cards_)

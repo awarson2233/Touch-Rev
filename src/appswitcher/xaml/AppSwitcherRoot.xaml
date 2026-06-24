@@ -6,8 +6,14 @@
 
     <Canvas x:Name="LayoutCanvas">
         <Border
-            x:Name="AppSwitcherContainer"
+            x:Name="AppSwitcherBackdrop"
             Canvas.ZIndex="0"
+            Background="Transparent"
+            CornerRadius="24" />
+
+        <Border
+            x:Name="AppSwitcherContainer"
+            Canvas.ZIndex="1"
             Background="#CC181818"
             BorderBrush="#55FFFFFF"
             BorderThickness="1"
@@ -17,7 +23,7 @@
             x:Name="FocusBorder"
             BorderBrush="#FF4CC2FF"
             BorderThickness="4"
-            Canvas.ZIndex="1"
+            Canvas.ZIndex="2"
             CornerRadius="20"
             IsHitTestVisible="False"
             Visibility="Collapsed"
