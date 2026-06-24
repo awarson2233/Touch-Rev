@@ -5,9 +5,7 @@
 #include <windows.h>
 #include <inspectable.h>
 
-#ifdef GetCurrentTime
-#undef GetCurrentTime
-#endif
+#include "common/XamlIslandCommon.h"
 
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Hosting.h>

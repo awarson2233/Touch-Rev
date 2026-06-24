@@ -3,6 +3,7 @@
 #include "appswitcher/WindowController.h"
 #include "common/Win32Error.h"
 #include "common/AppSettings.h"
+#include "common/DwmUtils.h"
 
 #include <algorithm>
 #include <dwmapi.h>
@@ -24,17 +25,7 @@ constexpr UINT kWmDwmCompositionChanged = WM_DWMCOMPOSITIONCHANGED;
 constexpr UINT kWmDwmCompositionChanged = 0x031E;
 #endif
 
-#if defined(DWMWA_CLOAK)
-constexpr DWORD kDwmwaCloak = DWMWA_CLOAK;
-#else
-constexpr DWORD kDwmwaCloak = 13;
-#endif
 
-#if defined(DWMWA_CLOAKED)
-constexpr DWORD kDwmwaCloaked = DWMWA_CLOAKED;
-#else
-constexpr DWORD kDwmwaCloaked = 14;
-#endif
 
 float GetMonitorDpi(HMONITOR monitor)
 {
@@ -53,34 +44,7 @@ float GetMonitorDpi(HMONITOR monitor)
     return static_cast<float>(dpiX);
 }
 
-bool SetWindowCloaked(HWND hwnd, bool cloaked)
-{
-    const int value = cloaked ? TRUE : FALSE;
-    const HRESULT hr = DwmSetWindowAttribute(hwnd, kDwmwaCloak, &value, sizeof(value));
-    if (FAILED(hr))
-    {
-        DebugLogHResult(cloaked ? L"DwmSetWindowAttribute(DWMWA_CLOAK true)" : L"DwmSetWindowAttribute(DWMWA_CLOAK false)", hr);
-        return false;
-    }
 
-    int cloakedState = 0;
-    const HRESULT getHr = DwmGetWindowAttribute(hwnd, kDwmwaCloaked, &cloakedState, sizeof(cloakedState));
-    if (FAILED(getHr))
-    {
-        DebugLogHResult(L"DwmGetWindowAttribute(DWMWA_CLOAKED)", getHr);
-        return true;
-    }
-
-    const bool isCloaked = cloakedState != 0;
-    if (isCloaked != cloaked)
-    {
-        std::wstringstream log;
-        log << L"[AppSwitcherCloak] requested=" << cloaked << L" actual=" << isCloaked << L" state=" << cloakedState;
-        DebugLog(log.str());
-        return false;
-    }
-    return true;
-}
 
 }
 
@@ -147,7 +111,7 @@ bool MainWindow::Initialize(HINSTANCE instance, int showCommand)
 
     ShowWindow(hwnd_, SW_SHOWNA);
     UpdateWindow(hwnd_);
-    SetWindowCloaked(hwnd_, true);
+    touchrev::common::dwm::SetWindowCloaked(hwnd_, true);
     isVisible_ = false;
     return true;
 }
@@ -667,7 +631,7 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
     RefreshTheme();
     appSwitcherMainView_.ApplyTheme(themeManager_.Palette());
     ShowWindow(hwnd_, SW_SHOWNA);
-    SetWindowCloaked(hwnd_, false);
+    touchrev::common::dwm::SetWindowCloaked(hwnd_, false);
     isVisible_ = true;
 
     const ActivationResult activation = TryActivateSwitcher();
@@ -685,7 +649,7 @@ void MainWindow::Hide()
 
     inputController_.Cancel(hwnd_);
     appSwitcherMainView_.CancelInteraction();
-    if (!SetWindowCloaked(hwnd_, true))
+    if (!touchrev::common::dwm::SetWindowCloaked(hwnd_, true))
     {
         ShowWindow(hwnd_, SW_HIDE);
     }

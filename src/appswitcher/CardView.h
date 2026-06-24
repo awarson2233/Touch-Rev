@@ -4,10 +4,6 @@
 #include "thumbnail/PrivateThumbnailManager.h"
 #include "ui/ThemeManager.h"
 
-#ifdef GetCurrentTime
-#undef GetCurrentTime
-#endif
-
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>

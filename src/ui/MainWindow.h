@@ -36,8 +36,6 @@ private:
     {
         bool foreground = false;
         bool directSucceeded = false;
-        bool attachAttempted = false;
-        bool attachSucceeded = false;
         HWND actualForeground = nullptr;
     };
 

@@ -1,6 +1,7 @@
 #include "WindowController.h"
 
 #include "common/Win32Error.h"
+#include "common/DwmUtils.h"
 
 #include <dwmapi.h>
 
@@ -62,8 +63,7 @@ bool IsAltTabLikeWindow(HWND hwnd)
         return false;
     }
 
-    BOOL cloaked = FALSE;
-    if (SUCCEEDED(DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &cloaked, sizeof(cloaked))) && cloaked)
+    if (touchrev::common::dwm::IsWindowCloaked(hwnd))
     {
         return false;
     }

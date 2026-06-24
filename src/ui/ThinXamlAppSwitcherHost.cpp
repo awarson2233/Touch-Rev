@@ -2,10 +2,6 @@
 
 #include "common/Win32Error.h"
 
-#ifdef GetCurrentTime
-#undef GetCurrentTime
-#endif
-
 #include <winrt/base.h>
 #include <winrt/Windows.UI.Xaml.h>
 
@@ -13,12 +9,6 @@
 
 namespace
 {
-constexpr GUID kIDesktopWindowXamlSourceNative = {
-    0x3cbcf1bf,
-    0x2f76,
-    0x4e9c,
-    {0x96, 0xab, 0xe8, 0x4b, 0x37, 0x97, 0x25, 0x54},
-};
 
 constexpr GUID kIXamlSourceTransparency = {
     0x06636c29,

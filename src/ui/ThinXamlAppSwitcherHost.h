@@ -3,18 +3,10 @@
 #include <windows.h>
 #include <inspectable.h>
 
-#ifdef GetCurrentTime
-#undef GetCurrentTime
-#endif
+#include "common/XamlIslandCommon.h"
 
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Hosting.h>
-
-struct IDesktopWindowXamlSourceNative : IUnknown
-{
-    virtual HRESULT STDMETHODCALLTYPE AttachToWindow(HWND parentWnd) = 0;
-    virtual HRESULT STDMETHODCALLTYPE get_WindowHandle(HWND* hWnd) = 0;
-};
 
 class ThinXamlAppSwitcherHost
 {

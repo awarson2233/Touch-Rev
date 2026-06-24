@@ -6,9 +6,7 @@
 #include "common/PathUtils.h"
 #include "common/GeometryUtils.h"
 
-#ifdef GetCurrentTime
-#undef GetCurrentTime
-#endif
+
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
@@ -32,12 +30,8 @@ namespace touchrev::appswitcher
 namespace
 {
 constexpr wchar_t kRootXamlPath[] = L"xaml/AppSwitcherRoot.xaml";
-constexpr wchar_t kItemXamlPath[] = L"xaml/SwitcherItem.xaml";
 
-winrt::Windows::UI::Xaml::Media::SolidColorBrush Brush(winrt::Windows::UI::Color color)
-{
-    return winrt::Windows::UI::Xaml::Media::SolidColorBrush(color);
-}
+using touchrev::common::xaml::Brush;
 
 winrt::Windows::UI::Xaml::Media::Brush TintBrush(const AppSwitcherPalette& palette)
 {

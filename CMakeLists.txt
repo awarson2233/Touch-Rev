@@ -36,6 +36,8 @@ add_executable(TouchRevGUI WIN32
     src/thumbnail/PrivateThumbnailManager.cpp
     src/thumbnail/PrivateThumbnailManager.h
     src/common/CoordinateSpace.h
+    src/common/XamlIslandCommon.h
+    src/common/DwmUtils.h
     src/common/IconUtils.cpp
     src/common/IconUtils.h
     src/input/InputController.cpp

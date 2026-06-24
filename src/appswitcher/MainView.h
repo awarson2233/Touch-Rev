@@ -7,10 +7,6 @@
 #include "ui/ThemeManager.h"
 #include "ui/ThinXamlAppSwitcherHost.h"
 
-#ifdef GetCurrentTime
-#undef GetCurrentTime
-#endif
-
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Xaml.Input.h>

@@ -1,4 +1,5 @@
 #include "LayoutEngine.h"
+#include "common/GeometryUtils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -17,16 +18,6 @@ struct RowItem
     size_t index = 0;
     RECT rect{};
 };
-
-int WidthOf(const RECT& rect)
-{
-    return rect.right - rect.left;
-}
-
-int HeightOf(const RECT& rect)
-{
-    return rect.bottom - rect.top;
-}
 }
 
 namespace touchrev::appswitcher
@@ -43,8 +34,8 @@ LayoutResult LayoutEngine::Calculate(
         return result;
     }
 
-    const int workWidth = std::max(1, WidthOf(workAreaPx));
-    const int workHeight = std::max(1, HeightOf(workAreaPx));
+    const int workWidth = std::max(1, touchrev::common::RectWidth(workAreaPx));
+    const int workHeight = std::max(1, touchrev::common::RectHeight(workAreaPx));
     const bool isPortrait = workHeight > workWidth;
 
     double sn = 0.16;
@@ -171,8 +162,8 @@ LayoutResult LayoutEngine::Calculate(
         for (const auto& item : row)
         {
             const RECT& r = item.rect;
-            const int width = WidthOf(r);
-            const int height = HeightOf(r);
+            const int width = touchrev::common::RectWidth(r);
+            const int height = touchrev::common::RectHeight(r);
             const LONG left = static_cast<LONG>(std::lround(static_cast<double>(r.left) + offsetX + paddingPx));
             const LONG top = static_cast<LONG>(std::lround(static_cast<double>(r.top) + paddingPx));
             result.items[item.index].rectPx = {left, top, left + width, top + height};

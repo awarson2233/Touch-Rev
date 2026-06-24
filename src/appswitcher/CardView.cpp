@@ -4,13 +4,10 @@
 #include "common/FileUtils.h"
 #include "common/PathUtils.h"
 #include "common/IconUtils.h"
+#include "common/XamlIslandCommon.h"
 
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.Graphics.Imaging.h>
-
-#ifdef GetCurrentTime
-#undef GetCurrentTime
-#endif
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
@@ -33,10 +30,7 @@
 
 namespace
 {
-winrt::Windows::UI::Xaml::Media::SolidColorBrush Brush(winrt::Windows::UI::Color color)
-{
-    return winrt::Windows::UI::Xaml::Media::SolidColorBrush(color);
-}
+using touchrev::common::xaml::Brush;
 
 void ApplyContentClip(winrt::Windows::UI::Xaml::FrameworkElement const& element, double width, double height)
 {

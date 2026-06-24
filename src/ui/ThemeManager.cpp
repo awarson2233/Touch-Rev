@@ -83,7 +83,6 @@ AppSwitcherPalette ThemeManager::PaletteForActivationState(bool active) const
     AppSwitcherPalette palette = palette_;
     if (!active)
     {
-        palette.containerAcrylicFallback = palette.containerBackground;
         palette.containerAcrylicTintOpacity = (mode_ == AppThemeMode::Dark) ? 0.55 : 0.6;
         palette.focusFill = Color(0x00, 0x00, 0x00, 0x00);
     }
@@ -174,7 +173,6 @@ AppSwitcherPalette ThemeManager::PaletteForTheme(AppThemeMode mode)
             Color(0xE8, 0xF3, 0xF3, 0xF3),
             Color(0x33, 0x00, 0x00, 0x00),
             Color(0xFF, 0xFF, 0xFF, 0xFF),
-            Color(0xB3, 0xF3, 0xF3, 0xF3),
             0.3,
             Color(0xFF, 0xFF, 0xFF, 0xFF),
             Color(0xFF, 0xF9, 0xF9, 0xF9),
@@ -200,7 +198,6 @@ AppSwitcherPalette ThemeManager::PaletteForTheme(AppThemeMode mode)
         Color(0xCC, 0x18, 0x18, 0x18),
         Color(0x55, 0xFF, 0xFF, 0xFF),
         Color(0xFF, 0x20, 0x20, 0x20),
-        Color(0xCC, 0x20, 0x20, 0x20),
         0.25,
         Color(0xEE, 0x24, 0x24, 0x24),
         Color(0xFF, 0x27, 0x27, 0x27),

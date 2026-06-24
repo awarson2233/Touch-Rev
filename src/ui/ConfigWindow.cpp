@@ -19,21 +19,8 @@
 
 #include <tlhelp32.h>
 
-struct IDesktopWindowXamlSourceNative : IUnknown
-{
-    virtual HRESULT STDMETHODCALLTYPE AttachToWindow(HWND parentWnd) = 0;
-    virtual HRESULT STDMETHODCALLTYPE get_WindowHandle(HWND* hWnd) = 0;
-};
-
 namespace
 {
-constexpr GUID kIDesktopWindowXamlSourceNative = {
-    0x3cbcf1bf,
-    0x2f76,
-    0x4e9c,
-    {0x96, 0xab, 0xe8, 0x4b, 0x37, 0x97, 0x25, 0x54},
-};
-
 constexpr wchar_t kWindowTitle[] = L"Touch-Rev 配置";
 }
 
