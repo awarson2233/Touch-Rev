@@ -46,6 +46,7 @@ public:
 
     AppThemeMode Mode() const { return mode_; }
     const AppSwitcherPalette& Palette() const { return palette_; }
+    AppSwitcherPalette PaletteForActivationState(bool active) const;
 
 private:
     static AppThemeMode ReadSystemTheme();

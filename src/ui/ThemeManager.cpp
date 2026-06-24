@@ -38,12 +38,6 @@ constexpr DWORD kDwmwaBorderColor = DWMWA_BORDER_COLOR;
 constexpr DWORD kDwmwaBorderColor = 34;
 #endif
 
-#if defined(DWMSBT_NONE)
-constexpr int kDwmsbtNone = DWMSBT_NONE;
-#else
-constexpr int kDwmsbtNone = 1;
-#endif
-
 #if defined(DWMWA_COLOR_NONE)
 constexpr COLORREF kDwmColorNone = DWMWA_COLOR_NONE;
 #else
@@ -84,6 +78,18 @@ bool ThemeManager::Refresh(HWND hwnd)
     return true;
 }
 
+AppSwitcherPalette ThemeManager::PaletteForActivationState(bool active) const
+{
+    AppSwitcherPalette palette = palette_;
+    if (!active)
+    {
+        palette.containerAcrylicFallback = palette.containerBackground;
+        palette.containerAcrylicTintOpacity = (mode_ == AppThemeMode::Dark) ? 0.55 : 0.6;
+        palette.focusFill = Color(0x00, 0x00, 0x00, 0x00);
+    }
+    return palette;
+}
+
 void ThemeManager::ApplyWindowBackdrop(HWND hwnd) const
 {
     BOOL darkMode = (mode_ == AppThemeMode::Dark) ? TRUE : FALSE;
@@ -119,7 +125,7 @@ void ThemeManager::ApplyWindowBackdrop(HWND hwnd) const
         DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_BORDER_COLOR)", hr);
     }
 
-    int backdrop = kDwmsbtNone;
+    int backdrop = 0; // DWMSBT_AUTO
     hr = DwmSetWindowAttribute(
         hwnd,
         kDwmwaSystemBackdropType,
@@ -128,6 +134,13 @@ void ThemeManager::ApplyWindowBackdrop(HWND hwnd) const
     if (FAILED(hr))
     {
         DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE)", hr);
+    }
+
+    MARGINS margins{-1, -1, -1, -1};
+    hr = DwmExtendFrameIntoClientArea(hwnd, &margins);
+    if (FAILED(hr))
+    {
+        DebugLogHResult(L"DwmExtendFrameIntoClientArea", hr);
     }
 }
 
@@ -161,8 +174,8 @@ AppSwitcherPalette ThemeManager::PaletteForTheme(AppThemeMode mode)
             Color(0xE8, 0xF3, 0xF3, 0xF3),
             Color(0x33, 0x00, 0x00, 0x00),
             Color(0xFF, 0xFF, 0xFF, 0xFF),
-            Color(0xE8, 0xF3, 0xF3, 0xF3),
-            0.55,
+            Color(0xB3, 0xF3, 0xF3, 0xF3),
+            0.3,
             Color(0xFF, 0xFF, 0xFF, 0xFF),
             Color(0xFF, 0xF9, 0xF9, 0xF9),
             Color(0xFF, 0xFF, 0xFF, 0xFF),
@@ -187,8 +200,8 @@ AppSwitcherPalette ThemeManager::PaletteForTheme(AppThemeMode mode)
         Color(0xCC, 0x18, 0x18, 0x18),
         Color(0x55, 0xFF, 0xFF, 0xFF),
         Color(0xFF, 0x20, 0x20, 0x20),
-        Color(0xE8, 0x20, 0x20, 0x20),
-        0.65,
+        Color(0xCC, 0x20, 0x20, 0x20),
+        0.25,
         Color(0xEE, 0x24, 0x24, 0x24),
         Color(0xFF, 0x27, 0x27, 0x27),
         Color(0xFF, 0x32, 0x32, 0x32),

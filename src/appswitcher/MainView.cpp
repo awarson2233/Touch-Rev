@@ -349,7 +349,7 @@ void MainView::ApplyTheme(const AppSwitcherPalette& palette)
 
     if (appSwitcherContainer_)
     {
-        appSwitcherContainer_.Background(Brush(palette_.containerBackground));
+        appSwitcherContainer_.Background(AcrylicBrush(palette_));
         appSwitcherContainer_.BorderBrush(Brush(palette_.containerBorder));
     }
 

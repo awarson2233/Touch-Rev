@@ -32,6 +32,15 @@ public:
     bool IsSwitcherVisible() const { return isVisible_; }
 
 private:
+    struct ActivationResult
+    {
+        bool foreground = false;
+        bool directSucceeded = false;
+        bool attachAttempted = false;
+        bool attachSucceeded = false;
+        HWND actualForeground = nullptr;
+    };
+
     static LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam);
 
     LRESULT HandleMessage(UINT message, WPARAM wParam, LPARAM lParam);
@@ -41,6 +50,8 @@ private:
     void OnDpiChanged(WPARAM wParam, LPARAM lParam);
     void OnPaint();
     void RefreshTheme();
+    void ApplyActivationVisualState(bool active);
+    ActivationResult TryActivateSwitcher();
     void SyncClientLayout(UINT width, UINT height, bool renderSwitcher);
     void RebaseActiveDrag();
     void ForwardDpiChangeToChild(WPARAM wParam, LPARAM lParam);
@@ -76,4 +87,7 @@ private:
     bool isSyncingLayout_ = false;
     bool isLongPressNavigating_ = false;
     bool pendingLongPressActivation_ = false;
+    bool activationSucceeded_ = false;
+    bool activationPending_ = false;
+    bool keyboardNavigationEnabled_ = false;
 };

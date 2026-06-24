@@ -5,6 +5,7 @@
 #include "common/AppSettings.h"
 
 #include <algorithm>
+#include <dwmapi.h>
 #include <sstream>
 #include <vector>
 #include <windowsx.h>
@@ -23,6 +24,18 @@ constexpr UINT kWmDwmCompositionChanged = WM_DWMCOMPOSITIONCHANGED;
 constexpr UINT kWmDwmCompositionChanged = 0x031E;
 #endif
 
+#if defined(DWMWA_CLOAK)
+constexpr DWORD kDwmwaCloak = DWMWA_CLOAK;
+#else
+constexpr DWORD kDwmwaCloak = 13;
+#endif
+
+#if defined(DWMWA_CLOAKED)
+constexpr DWORD kDwmwaCloaked = DWMWA_CLOAKED;
+#else
+constexpr DWORD kDwmwaCloaked = 14;
+#endif
+
 float GetMonitorDpi(HMONITOR monitor)
 {
     typedef HRESULT(WINAPI* GetDpiForMonitorProc)(HMONITOR, int, UINT*, UINT*);
@@ -39,10 +52,42 @@ float GetMonitorDpi(HMONITOR monitor)
     }
     return static_cast<float>(dpiX);
 }
+
+bool SetWindowCloaked(HWND hwnd, bool cloaked)
+{
+    const int value = cloaked ? TRUE : FALSE;
+    const HRESULT hr = DwmSetWindowAttribute(hwnd, kDwmwaCloak, &value, sizeof(value));
+    if (FAILED(hr))
+    {
+        DebugLogHResult(cloaked ? L"DwmSetWindowAttribute(DWMWA_CLOAK true)" : L"DwmSetWindowAttribute(DWMWA_CLOAK false)", hr);
+        return false;
+    }
+
+    int cloakedState = 0;
+    const HRESULT getHr = DwmGetWindowAttribute(hwnd, kDwmwaCloaked, &cloakedState, sizeof(cloakedState));
+    if (FAILED(getHr))
+    {
+        DebugLogHResult(L"DwmGetWindowAttribute(DWMWA_CLOAKED)", getHr);
+        return true;
+    }
+
+    const bool isCloaked = cloakedState != 0;
+    if (isCloaked != cloaked)
+    {
+        std::wstringstream log;
+        log << L"[AppSwitcherCloak] requested=" << cloaked << L" actual=" << isCloaked << L" state=" << cloakedState;
+        DebugLog(log.str());
+        return false;
+    }
+    return true;
 }
+
+}
+
 
 bool MainWindow::Initialize(HINSTANCE instance, int showCommand)
 {
+    (void)showCommand;
     instance_ = instance;
     wakeMessage_ = RegisterWindowMessageW(WakeMessageName);
     if (wakeMessage_ == 0)
@@ -100,9 +145,10 @@ bool MainWindow::Initialize(HINSTANCE instance, int showCommand)
         return false;
     }
 
-    ShowWindow(hwnd_, showCommand);
-    isVisible_ = showCommand != SW_HIDE;
+    ShowWindow(hwnd_, SW_SHOWNA);
     UpdateWindow(hwnd_);
+    SetWindowCloaked(hwnd_, true);
+    isVisible_ = false;
     return true;
 }
 
@@ -176,6 +222,13 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 
     switch (message)
     {
+    case WM_ACTIVATE:
+    {
+        const WORD state = LOWORD(wParam);
+        ApplyActivationVisualState(state != WA_INACTIVE);
+        break;
+    }
+
     case WM_WINDOWPOSCHANGING:
     {
         auto* pos = reinterpret_cast<WINDOWPOS*>(lParam);
@@ -500,8 +553,73 @@ void MainWindow::RefreshTheme()
     const bool changed = themeManager_.Refresh(hwnd_);
     if (changed)
     {
-        appSwitcherMainView_.ApplyTheme(themeManager_.Palette());
+        appSwitcherMainView_.ApplyTheme(themeManager_.PaletteForActivationState(activationSucceeded_));
     }
+}
+
+void MainWindow::ApplyActivationVisualState(bool active)
+{
+    activationPending_ = false;
+    activationSucceeded_ = active && GetForegroundWindow() == hwnd_;
+    keyboardNavigationEnabled_ = activationSucceeded_;
+    appSwitcherMainView_.ApplyTheme(themeManager_.PaletteForActivationState(activationSucceeded_));
+}
+
+MainWindow::ActivationResult MainWindow::TryActivateSwitcher()
+{
+    ActivationResult result{};
+    result.actualForeground = GetForegroundWindow();
+    if (result.actualForeground == hwnd_)
+    {
+        result.foreground = true;
+        result.directSucceeded = true;
+        SetActiveWindow(hwnd_);
+        SetFocus(hwnd_);
+        return result;
+    }
+
+    BringWindowToTop(hwnd_);
+    ShowWindow(hwnd_, SW_SHOW);
+    result.directSucceeded = SetForegroundWindow(hwnd_) != FALSE && GetForegroundWindow() == hwnd_;
+    if (result.directSucceeded)
+    {
+        SetActiveWindow(hwnd_);
+        SetFocus(hwnd_);
+    }
+
+    result.actualForeground = GetForegroundWindow();
+    if (!result.directSucceeded && result.actualForeground && result.actualForeground != hwnd_)
+    {
+        const DWORD foregroundThreadId = GetWindowThreadProcessId(result.actualForeground, nullptr);
+        const DWORD currentThreadId = GetCurrentThreadId();
+        if (foregroundThreadId != currentThreadId && foregroundThreadId != 0)
+        {
+            result.attachAttempted = true;
+            result.attachSucceeded = AttachThreadInput(currentThreadId, foregroundThreadId, TRUE) != FALSE;
+            if (result.attachSucceeded)
+            {
+                BringWindowToTop(hwnd_);
+                ShowWindow(hwnd_, SW_SHOW);
+                SetForegroundWindow(hwnd_);
+                SetActiveWindow(hwnd_);
+                SetFocus(hwnd_);
+                AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
+            }
+        }
+    }
+
+    result.actualForeground = GetForegroundWindow();
+    result.foreground = result.actualForeground == hwnd_;
+
+    std::wstringstream log;
+    log << L"[AppSwitcherActivation] foreground=" << result.foreground
+        << L" direct=" << result.directSucceeded
+        << L" attachAttempted=" << result.attachAttempted
+        << L" attachSucceeded=" << result.attachSucceeded
+        << L" actualForeground=" << result.actualForeground;
+    DebugLog(log.str());
+
+    return result;
 }
 
 void MainWindow::SyncClientLayout(UINT width, UINT height, bool renderSwitcher)
@@ -549,15 +667,6 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
 
     dpi_ = GetMonitorDpi(targetMonitor_);
     const RECT windowRect = targetMonitorRectPx_;
-    SetWindowPos(
-        hwnd_,
-        HWND_TOPMOST,
-        windowRect.left,
-        windowRect.top,
-        windowRect.right - windowRect.left,
-        windowRect.bottom - windowRect.top,
-        SWP_NOACTIVATE);
-
     const int width = windowRect.right - windowRect.left;
     const int height = windowRect.bottom - windowRect.top;
 
@@ -566,10 +675,28 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
     ForwardDpiChangeToChild(wp, reinterpret_cast<LPARAM>(&childSuggestedRect));
 
     SyncClientLayout(width, height, true);
+
+    activationPending_ = true;
+    activationSucceeded_ = false;
+    keyboardNavigationEnabled_ = false;
+
+    SetWindowPos(
+        hwnd_,
+        HWND_TOPMOST,
+        windowRect.left,
+        windowRect.top,
+        width,
+        height,
+        SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
     RefreshTheme();
-    ShowWindow(hwnd_, SW_SHOW);
-    SetForegroundWindow(hwnd_);
+    appSwitcherMainView_.ApplyTheme(themeManager_.Palette());
+    ShowWindow(hwnd_, SW_SHOWNA);
+    SetWindowCloaked(hwnd_, false);
     isVisible_ = true;
+
+    const ActivationResult activation = TryActivateSwitcher();
+    ApplyActivationVisualState(activation.foreground);
 
     isSyncingLayout_ = false;
 }
@@ -583,10 +710,16 @@ void MainWindow::Hide()
 
     inputController_.Cancel(hwnd_);
     appSwitcherMainView_.CancelInteraction();
-    ShowWindow(hwnd_, SW_HIDE);
+    if (!SetWindowCloaked(hwnd_, true))
+    {
+        ShowWindow(hwnd_, SW_HIDE);
+    }
     isVisible_ = false;
     isLongPressNavigating_ = false;
     pendingLongPressActivation_ = false;
+    activationSucceeded_ = false;
+    activationPending_ = false;
+    keyboardNavigationEnabled_ = false;
 }
 
 void MainWindow::ToggleSwitcher()
@@ -668,6 +801,11 @@ void MainWindow::DispatchGestureAction(const InputController::RawInputResult& in
 
 bool MainWindow::HandleKeyDown(WPARAM key)
 {
+    if (!keyboardNavigationEnabled_ && key != VK_ESCAPE)
+    {
+        return false;
+    }
+
     switch (key)
     {
     case VK_ESCAPE:

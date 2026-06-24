@@ -106,6 +106,7 @@ private:
     std::vector<HWND> dismissedHwnds_;
     AppSwitcherPalette palette_{};
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
+
     double gestureAccX_ = 0.0;
     double gestureAccY_ = 0.0;
 };

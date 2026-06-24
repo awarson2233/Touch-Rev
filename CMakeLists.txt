@@ -4,6 +4,10 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 project(TouchRevGUI LANGUAGES CXX RC)
 
+if(MSVC)
+    add_compile_options(/MP /FS)
+endif()
+
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 option(TOUCHREV_BUILD_BLOCKER "Build TouchRev blocker hook and injector" OFF)
