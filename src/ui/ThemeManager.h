@@ -14,8 +14,6 @@ struct AppSwitcherPalette
     winrt::Windows::UI::Color rootBackdrop{};
     winrt::Windows::UI::Color containerBackground{};
     winrt::Windows::UI::Color containerBorder{};
-    winrt::Windows::UI::Color containerAcrylicTint{};
-    double containerAcrylicTintOpacity = 0.0;
     winrt::Windows::UI::Color cardBackground{};
     winrt::Windows::UI::Color titleBackground{};
     winrt::Windows::UI::Color titleHoverBackground{};

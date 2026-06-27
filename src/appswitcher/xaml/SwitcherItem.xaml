@@ -4,24 +4,28 @@
     x:Name="RootGrid"
     Background="Transparent"
     RenderTransformOrigin="0.5,0.5">
+    <Grid.Resources>
+        <x:Double x:Key="PressedScale">0.985</x:Double>
+        <x:Double x:Key="GrabbedScale">0.90</x:Double>
+    </Grid.Resources>
     <Grid.RenderTransform>
         <CompositeTransform x:Name="ItemTransform" />
     </Grid.RenderTransform>
 
     <Border
         x:Name="MainCard"
-        Background="#EE242424"
+        Background="{ThemeResource CardBackgroundBrush}"
         CornerRadius="10">
         <Grid x:Name="ItemLayoutGrid">
             <Grid.RowDefinitions>
-                <RowDefinition Height="1.6*" />
-                <RowDefinition Height="8.4*" />
+                <RowDefinition Height="1.8*" />
+                <RowDefinition Height="8.2*" />
             </Grid.RowDefinitions>
 
             <Border
                 x:Name="TitleBorder"
                 Grid.Row="0"
-                Background="#F0303030"
+                Background="{ThemeResource TitleBackgroundBrush}"
                 BorderThickness="0"
                 CornerRadius="10,10,0,0">
                 <Grid x:Name="TitleGrid" Padding="0">
@@ -47,7 +51,7 @@
                             x:Name="DefaultIcon"
                             FontFamily="Segoe MDL2 Assets"
                             FontSize="14"
-                            Foreground="#CCFFFFFF"
+                            Foreground="{ThemeResource IconTextBrush}"
                             Text="&#xE700;"
                             Visibility="Visible" />
                     </Grid>
@@ -58,7 +62,7 @@
                         Margin="4,0,4,0"
                         VerticalAlignment="Center"
                         FontSize="12"
-                        Foreground="#FFFFFFFF"
+                        Foreground="{ThemeResource PrimaryTextBrush}"
                         TextTrimming="CharacterEllipsis" />
 
                     <Button
@@ -67,12 +71,19 @@
                         Padding="0"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Stretch"
-                        Background="Transparent"
                         BorderThickness="0"
                         Content="&#xE106;"
                         FontFamily="Segoe MDL2 Assets"
-                        FontSize="10"
-                        Foreground="#CCFFFFFF" />
+                        FontSize="10">
+                        <Button.Resources>
+                            <SolidColorBrush x:Key="ButtonBackground" Color="Transparent" />
+                            <SolidColorBrush x:Key="ButtonForeground" Color="{ThemeResource ButtonTextColor}" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPointerOver" Color="{ThemeResource CloseButtonHoverBackgroundColor}" />
+                            <SolidColorBrush x:Key="ButtonForegroundPointerOver" Color="{ThemeResource CloseButtonHoverTextColor}" />
+                            <SolidColorBrush x:Key="ButtonBackgroundPressed" Color="{ThemeResource CloseButtonHoverBackgroundColor}" />
+                            <SolidColorBrush x:Key="ButtonForegroundPressed" Color="{ThemeResource CloseButtonHoverTextColor}" />
+                        </Button.Resources>
+                    </Button>
                 </Grid>
             </Border>
 
@@ -80,7 +91,7 @@
                 x:Name="ContentFrame"
                 Grid.Row="1"
                 Margin="0"
-                Background="#FF101010"
+                Background="{ThemeResource ContentBackgroundBrush}"
                 BorderThickness="0"
                 CornerRadius="0,0,10,10">
                 <Grid>
@@ -96,7 +107,7 @@
             <Border
                 x:Name="PressOverlay"
                 Grid.RowSpan="2"
-                Background="#22000000"
+                Background="{ThemeResource CardPressedOverlayBrush}"
                 CornerRadius="10"
                 IsHitTestVisible="False"
                 Visibility="Collapsed" />

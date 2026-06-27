@@ -32,7 +32,7 @@ public:
     RECT ContainerBoundsPx() const;
     PointDip DragPosition() const { return dragPosition_; }
     void SetDragPosition(PointDip position);
-    void ApplyTheme(const AppSwitcherPalette& palette);
+    void ApplyTheme(const AppSwitcherPalette& palette, bool active = true);
     void SetBoundsChangedCallback(std::function<void()> callback);
     void SetMissedInputCallback(std::function<void()> callback);
     void SetItemActivatedCallback(std::function<void(HWND)> callback);
@@ -66,6 +66,7 @@ private:
     void ProcessItemPressed(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args);
     void ProcessItemMoved(winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args);
     void ProcessItemReleased(winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args);
+    void UpdateContainerAcrylicBrush();
 
     HWND hwnd_ = nullptr;
 
@@ -73,7 +74,6 @@ private:
     bool initialized_ = false;
 
     winrt::Windows::UI::Xaml::Controls::Grid root_{nullptr};
-    winrt::Windows::UI::Xaml::Controls::Border appSwitcherBackdrop_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border appSwitcherContainer_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Canvas layoutCanvas_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border focusBorder_{nullptr};
@@ -103,11 +103,12 @@ private:
     std::function<bool(HWND)> itemCloseRequestedCallback_;
     std::vector<HWND> dismissedHwnds_;
     AppSwitcherPalette palette_{};
-    winrt::Windows::UI::Composition::SpriteVisual backdropVisual_{nullptr};
-    winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry roundedClip_{nullptr};
+    winrt::Windows::UI::Composition::SpriteVisual containerAcrylicVisual_{nullptr};
+    winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry containerAcrylicClip_{nullptr};
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
 
     double gestureAccX_ = 0.0;
     double gestureAccY_ = 0.0;
+    bool isWindowActive_ = true;
 };
 }

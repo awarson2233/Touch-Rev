@@ -26,6 +26,12 @@ constexpr DWORD kDwmwaSystemBackdropType = DWMWA_SYSTEMBACKDROP_TYPE;
 constexpr DWORD kDwmwaSystemBackdropType = 38;
 #endif
 
+#if defined(DWMWA_USE_HOSTBACKDROPBRUSH)
+constexpr DWORD kDwmwaUseHostBackdropBrush = DWMWA_USE_HOSTBACKDROPBRUSH;
+#else
+constexpr DWORD kDwmwaUseHostBackdropBrush = 17;
+#endif
+
 #if defined(DWMWCP_DONOTROUND)
 constexpr int kDwmwcpDoNotRound = DWMWCP_DONOTROUND;
 #else
@@ -83,7 +89,6 @@ AppSwitcherPalette ThemeManager::PaletteForActivationState(bool active) const
     AppSwitcherPalette palette = palette_;
     if (!active)
     {
-        palette.containerAcrylicTintOpacity = (mode_ == AppThemeMode::Dark) ? 0.55 : 0.6;
         palette.focusFill = Color(0x00, 0x00, 0x00, 0x00);
     }
     return palette;
@@ -135,6 +140,17 @@ void ThemeManager::ApplyWindowBackdrop(HWND hwnd) const
         DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_SYSTEMBACKDROP_TYPE)", hr);
     }
 
+    BOOL hostBackdropBrush = TRUE;
+    hr = DwmSetWindowAttribute(
+        hwnd,
+        kDwmwaUseHostBackdropBrush,
+        &hostBackdropBrush,
+        sizeof(hostBackdropBrush));
+    if (FAILED(hr))
+    {
+        DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_USE_HOSTBACKDROPBRUSH)", hr);
+    }
+
     MARGINS margins{-1, -1, -1, -1};
     hr = DwmExtendFrameIntoClientArea(hwnd, &margins);
     if (FAILED(hr))
@@ -173,8 +189,6 @@ AppSwitcherPalette ThemeManager::PaletteForTheme(AppThemeMode mode)
             Color(0xE8, 0xF3, 0xF3, 0xF3),
             Color(0x33, 0x00, 0x00, 0x00),
             Color(0xFF, 0xFF, 0xFF, 0xFF),
-            0.3,
-            Color(0xFF, 0xFF, 0xFF, 0xFF),
             Color(0xFF, 0xF9, 0xF9, 0xF9),
             Color(0xFF, 0xFF, 0xFF, 0xFF),
             Color(0xFF, 0xF0, 0xF0, 0xF0),
@@ -197,8 +211,6 @@ AppSwitcherPalette ThemeManager::PaletteForTheme(AppThemeMode mode)
         Color(0x00, 0x00, 0x00, 0x00),
         Color(0xCC, 0x18, 0x18, 0x18),
         Color(0x55, 0xFF, 0xFF, 0xFF),
-        Color(0xFF, 0x20, 0x20, 0x20),
-        0.25,
         Color(0xEE, 0x24, 0x24, 0x24),
         Color(0xFF, 0x27, 0x27, 0x27),
         Color(0xFF, 0x32, 0x32, 0x32),

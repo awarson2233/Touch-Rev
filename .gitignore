@@ -19,3 +19,8 @@ cmake_install.cmake
 *.obj
 *.tlog
 *.lastbuildstate
+
+# User config
+.antigravitycli
+.claude
+.agents

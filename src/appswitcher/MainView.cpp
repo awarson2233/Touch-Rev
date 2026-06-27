@@ -6,7 +6,7 @@
 #include "common/PathUtils.h"
 #include "common/GeometryUtils.h"
 
-
+#include <win32acrylic/composition_acrylic.h>
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
@@ -30,14 +30,41 @@ namespace touchrev::appswitcher
 namespace
 {
 constexpr wchar_t kRootXamlPath[] = L"xaml/AppSwitcherRoot.xaml";
+constexpr wchar_t kThemeXamlPath[] = L"xaml/ThemeResources.xaml";
 
 using touchrev::common::xaml::Brush;
 
-winrt::Windows::UI::Xaml::Media::Brush TintBrush(const AppSwitcherPalette& palette)
+bool AppendAppSwitcherThemeResources(winrt::Windows::UI::Xaml::ResourceDictionary const& resources)
 {
-    auto color = palette.containerAcrylicTint;
-    color.A = static_cast<uint8_t>(color.A * palette.containerAcrylicTintOpacity);
-    return Brush(color);
+    try
+    {
+        const std::wstring themeXaml = touchrev::common::LoadTextFileUtf8(touchrev::common::ModuleRelativePath(kThemeXamlPath));
+        if (themeXaml.empty())
+        {
+            DebugLog(L"ThemeResources.xaml is empty or missing.");
+            return false;
+        }
+
+        auto themeRes = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{themeXaml})
+                            .as<winrt::Windows::UI::Xaml::ResourceDictionary>();
+        resources.MergedDictionaries().Append(themeRes);
+        return true;
+    }
+    catch (const winrt::hresult_error& error)
+    {
+        DebugLogHResult(L"Load ThemeResources.xaml in MainView", error.code());
+        return false;
+    }
+}
+
+win32acrylic::Color ToAcrylicColor(winrt::Windows::UI::Color color, double opacity)
+{
+    const float alpha = static_cast<float>(std::clamp(opacity, 0.0, 1.0)) * (static_cast<float>(color.A) / 255.0f);
+    return {
+        static_cast<float>(color.R) / 255.0f,
+        static_cast<float>(color.G) / 255.0f,
+        static_cast<float>(color.B) / 255.0f,
+        alpha};
 }
 }
 std::vector<ItemGeometry> MainView::GetItemGeometries() const
@@ -82,7 +109,10 @@ void MainView::Shutdown()
         item->Reset(palette_);
     }
     cards_.clear();
-    appSwitcherBackdrop_ = nullptr;
+    if (appSwitcherContainer_)
+    {
+        winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(appSwitcherContainer_, nullptr);
+    }
     appSwitcherContainer_ = nullptr;
     layoutCanvas_ = nullptr;
     focusBorder_ = nullptr;
@@ -92,8 +122,8 @@ void MainView::Shutdown()
     root_ = nullptr;
     host_ = nullptr;
     hwnd_ = nullptr;
-    backdropVisual_ = nullptr;
-    roundedClip_ = nullptr;
+    containerAcrylicVisual_ = nullptr;
+    containerAcrylicClip_ = nullptr;
     initialized_ = false;
 }
 
@@ -324,40 +354,73 @@ void MainView::AttachPointerHandlers()
     // Item-level pointer handlers are attached when SwitcherItem instances are created.
 }
 
-void MainView::ApplyTheme(const AppSwitcherPalette& palette)
+void MainView::ApplyTheme(const AppSwitcherPalette& palette, bool active)
 {
     palette_ = palette;
-
-    if (root_)
-    {
-        root_.Background(Brush(palette_.rootBackdrop));
-    }
+    isWindowActive_ = active;
 
     if (appSwitcherContainer_)
     {
-        appSwitcherContainer_.Background(TintBrush(palette_));
-        appSwitcherContainer_.BorderBrush(Brush(palette_.containerBorder));
-    }
-
-    if (focusBorder_)
-    {
-        focusBorder_.BorderBrush(Brush(palette_.focusBorder));
-        focusBorder_.Background(Brush(palette_.focusFill));
-    }
-
-    if (emptyIcon_)
-    {
-        emptyIcon_.Foreground(Brush(palette_.secondaryText));
-    }
-
-    if (emptyText_)
-    {
-        emptyText_.Foreground(Brush(palette_.secondaryText));
+        UpdateContainerAcrylicBrush();
     }
 
     for (auto& item : cards_)
     {
-        item->ApplyTheme(palette_);
+        item->ApplyTheme(palette_, active);
+    }
+}
+
+void MainView::UpdateContainerAcrylicBrush()
+{
+    if (!containerAcrylicVisual_)
+    {
+        return;
+    }
+
+    try
+    {
+        double blurAmount = 80.0;
+        double noiseOpacity = 0.02;
+        double tintOpacity = isWindowActive_ ? 0.25 : 0.55;
+        winrt::Windows::UI::Color tintColor = {0xFF, 0x20, 0x20, 0x20};
+
+        if (appSwitcherContainer_)
+        {
+            auto res = appSwitcherContainer_.Resources();
+            if (res.HasKey(winrt::box_value(L"AcrylicBlurAmount")))
+            {
+                blurAmount = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"AcrylicBlurAmount")));
+            }
+            if (res.HasKey(winrt::box_value(L"AcrylicNoiseOpacity")))
+            {
+                noiseOpacity = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"AcrylicNoiseOpacity")));
+            }
+            
+            const auto opacityKey = isWindowActive_ ? L"AcrylicTintOpacity" : L"AcrylicInactiveTintOpacity";
+            if (res.HasKey(winrt::box_value(opacityKey)))
+            {
+                tintOpacity = winrt::unbox_value<double>(res.Lookup(winrt::box_value(opacityKey)));
+            }
+            
+            if (res.HasKey(winrt::box_value(L"AcrylicTintColor")))
+            {
+                tintColor = winrt::unbox_value<winrt::Windows::UI::Color>(res.Lookup(winrt::box_value(L"AcrylicTintColor")));
+            }
+        }
+
+        auto compositor = containerAcrylicVisual_.Compositor();
+        win32acrylic::AcrylicBrushOptions options{};
+        options.material = win32acrylic::AcrylicMaterial::Acrylic;
+        options.backdropSource = win32acrylic::BackdropSource::HostBackdrop;
+        options.tintColor = ToAcrylicColor(tintColor, tintOpacity);
+        options.luminosityColor = ToAcrylicColor(tintColor, 0.8);
+        options.blurAmount = static_cast<float>(blurAmount);
+        options.noiseOpacity = static_cast<float>(noiseOpacity);
+        containerAcrylicVisual_.Brush(win32acrylic::CreateAcrylicBrush(compositor, options));
+    }
+    catch (const winrt::hresult_error& error)
+    {
+        DebugLogHResult(L"Create AppSwitcherContainer acrylic brush", error.code());
     }
 }
 
@@ -523,6 +586,15 @@ bool MainView::LoadRoot()
 {
     try
     {
+        auto app = winrt::Windows::UI::Xaml::Application::Current();
+        if (!app)
+        {
+            DebugLog(L"Xaml Application is not available.");
+            return false;
+        }
+
+        AppendAppSwitcherThemeResources(app.Resources());
+
         const std::wstring xaml = touchrev::common::LoadTextFileUtf8(touchrev::common::ModuleRelativePath(kRootXamlPath));
         if (xaml.empty())
         {
@@ -532,28 +604,28 @@ bool MainView::LoadRoot()
 
         auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
         root_ = object.as<winrt::Windows::UI::Xaml::Controls::Grid>();
-        appSwitcherBackdrop_ = root_.FindName(L"AppSwitcherBackdrop").as<winrt::Windows::UI::Xaml::Controls::Border>();
-        if (appSwitcherBackdrop_)
+
+        appSwitcherContainer_ = root_.FindName(L"AppSwitcherContainer").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        if (appSwitcherContainer_)
         {
-            auto hostVisual = winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::GetElementVisual(appSwitcherBackdrop_);
+            auto hostVisual = winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::GetElementVisual(appSwitcherContainer_);
             auto compositor = hostVisual.Compositor();
-            backdropVisual_ = compositor.CreateSpriteVisual();
-            backdropVisual_.Brush(compositor.CreateHostBackdropBrush());
+            containerAcrylicVisual_ = compositor.CreateSpriteVisual();
             try
             {
-                roundedClip_ = compositor.CreateRoundedRectangleGeometry();
-                roundedClip_.CornerRadius({ 24.f, 24.f });
-                auto clip = compositor.CreateGeometricClip(roundedClip_);
-                backdropVisual_.Clip(clip);
+                containerAcrylicClip_ = compositor.CreateRoundedRectangleGeometry();
+                const auto xamlRadius = appSwitcherContainer_.CornerRadius();
+                const float radius = static_cast<float>(xamlRadius.TopLeft);
+                containerAcrylicClip_.CornerRadius({radius, radius});
+                auto clip = compositor.CreateGeometricClip(containerAcrylicClip_);
+                containerAcrylicVisual_.Clip(clip);
             }
             catch (const winrt::hresult_error& error)
             {
-                DebugLogHResult(L"Create rounded clip geometry", error.code());
+                DebugLogHResult(L"Create AppSwitcherContainer acrylic clip", error.code());
             }
-            winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(appSwitcherBackdrop_, backdropVisual_);
+            winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(appSwitcherContainer_, containerAcrylicVisual_);
         }
-
-        appSwitcherContainer_ = root_.FindName(L"AppSwitcherContainer").as<winrt::Windows::UI::Xaml::Controls::Border>();
         layoutCanvas_ = root_.FindName(L"LayoutCanvas").as<winrt::Windows::UI::Xaml::Controls::Canvas>();
         focusBorder_ = root_.FindName(L"FocusBorder").as<winrt::Windows::UI::Xaml::Controls::Border>();
         emptyGrid_ = root_.FindName(L"EmptyGrid").as<winrt::Windows::UI::Xaml::FrameworkElement>();
@@ -578,7 +650,7 @@ bool MainView::LoadRoot()
         });
 
         host_->SetRoot(root_);
-        ApplyTheme(palette_);
+        ApplyTheme(palette_, isWindowActive_);
         AttachPointerHandlers();
         return true;
     }
@@ -742,23 +814,7 @@ void MainView::UpdateVisibleBoundsAndPositions()
     const float widthDip = contentBoundsDip_.width;
     const float heightDip = contentBoundsDip_.height;
 
-    if (appSwitcherBackdrop_)
-    {
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(appSwitcherBackdrop_, contentOriginDip_.x);
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(appSwitcherBackdrop_, contentOriginDip_.y);
-        appSwitcherBackdrop_.Width(widthDip);
-        appSwitcherBackdrop_.Height(heightDip);
-    }
 
-    if (backdropVisual_)
-    {
-        backdropVisual_.Size({ widthDip, heightDip });
-    }
-
-    if (roundedClip_)
-    {
-        roundedClip_.Size({ widthDip, heightDip });
-    }
 
     if (appSwitcherContainer_)
     {
@@ -766,6 +822,16 @@ void MainView::UpdateVisibleBoundsAndPositions()
         winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(appSwitcherContainer_, contentOriginDip_.y);
         appSwitcherContainer_.Width(widthDip);
         appSwitcherContainer_.Height(heightDip);
+    }
+
+    if (containerAcrylicVisual_)
+    {
+        containerAcrylicVisual_.Size({widthDip, heightDip});
+    }
+
+    if (containerAcrylicClip_)
+    {
+        containerAcrylicClip_.Size({widthDip, heightDip});
     }
 
     for (auto& item : cards_)
@@ -816,7 +882,15 @@ void MainView::UpdateSelectionVisual()
     }
 
     const auto& selectedItem = *cards_[selectedItemIndex_];
-    constexpr double inflationDip = 10.0;
+    double inflationDip = 10.0;
+    if (focusBorder_)
+    {
+        auto res = focusBorder_.Resources();
+        if (res.HasKey(winrt::box_value(L"InflationDip")))
+        {
+            inflationDip = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"InflationDip")));
+        }
+    }
     winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(
         focusBorder_,
         selectedItem.layoutPosition.x - inflationDip);
@@ -839,11 +913,54 @@ void MainView::ApplyLayout(
         return;
     }
 
+    double paddingDip = 48.0;
+    double itemGapDip = 32.0;
+    double minAspect = 0.4;
+    double maxAspect = 2.5;
+    double titleRowWeight = 1.8;
+    double contentRowWeight = 8.2;
+
+    if (root_)
+    {
+        auto res = root_.Resources();
+        if (res.HasKey(winrt::box_value(L"PaddingDip")))
+        {
+            paddingDip = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"PaddingDip")));
+        }
+        if (res.HasKey(winrt::box_value(L"ItemGapDip")))
+        {
+            itemGapDip = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"ItemGapDip")));
+        }
+        if (res.HasKey(winrt::box_value(L"MinAspect")))
+        {
+            minAspect = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"MinAspect")));
+        }
+        if (res.HasKey(winrt::box_value(L"MaxAspect")))
+        {
+            maxAspect = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"MaxAspect")));
+        }
+    }
+
     EnsureItemCount(windows.size());
+    if (!cards_.empty() && cards_[0])
+    {
+        titleRowWeight = cards_[0]->TitleRowWeight();
+        contentRowWeight = cards_[0]->ContentRowWeight();
+    }
+
     const double safeScale = std::max(0.01, scale);
     currentDpiScale_ = safeScale;
     RECT workArea{0, 0, static_cast<LONG>(std::max(1u, widthPx)), static_cast<LONG>(std::max(1u, heightPx))};
-    const LayoutResult layout = LayoutEngine::Calculate(windows, workArea, safeScale);
+    const LayoutResult layout = LayoutEngine::Calculate(
+        windows,
+        workArea,
+        safeScale,
+        paddingDip,
+        itemGapDip,
+        titleRowWeight,
+        contentRowWeight,
+        minAspect,
+        maxAspect);
     contentBoundsDip_ = {
         static_cast<float>(static_cast<double>(layout.totalSizePx.cx) / safeScale),
         static_cast<float>(static_cast<double>(layout.totalSizePx.cy) / safeScale)};

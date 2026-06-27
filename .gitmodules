@@ -1,0 +1,3 @@
+[submodule "third_party/Win32Acrylic"]
+	path = third_party/Win32Acrylic
+	url = https://github.com/awarson2233/Win32Acrylic.git

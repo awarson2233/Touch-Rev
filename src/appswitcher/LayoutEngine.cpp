@@ -25,7 +25,13 @@ namespace touchrev::appswitcher
 LayoutResult LayoutEngine::Calculate(
     const std::vector<WindowItem>& windows,
     const RECT& workAreaPx,
-    double scale)
+    double scale,
+    double paddingDip,
+    double itemGapDip,
+    double titleRowWeight,
+    double contentRowWeight,
+    double minAspect,
+    double maxAspect)
 {
     LayoutResult result;
     const size_t count = windows.size();
@@ -49,8 +55,8 @@ LayoutResult LayoutEngine::Calculate(
     }
 
     const double safeScale = std::max(0.01, scale);
-    const double paddingPx = PaddingDip * safeScale;
-    const double gapPx = ItemGapDip * safeScale;
+    const double paddingPx = paddingDip * safeScale;
+    const double gapPx = itemGapDip * safeScale;
 
     std::vector<SizeDouble> itemSizes;
     itemSizes.reserve(count);
@@ -63,14 +69,14 @@ LayoutResult LayoutEngine::Calculate(
         {
             aspect = window.widthPx / window.heightPx;
         }
-        aspect = std::clamp(aspect, MinAspect, MaxAspect);
+        aspect = std::clamp(aspect, minAspect, maxAspect);
 
         double itemWidth = 0.0;
         double itemHeight = 0.0;
         if (!isPortrait)
         {
             const double thumbHeight = static_cast<double>(workHeight) * sn;
-            const double titleHeight = static_cast<double>(workHeight) * (TitleRowWeight / ContentRowWeight) * 0.30;
+            const double titleHeight = static_cast<double>(workHeight) * (titleRowWeight / (contentRowWeight > 0.0 ? contentRowWeight : 1.0)) * 0.30;
             itemHeight = thumbHeight + titleHeight;
             itemWidth = thumbHeight * aspect;
         }

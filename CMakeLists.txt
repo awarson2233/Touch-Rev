@@ -13,6 +13,8 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 option(TOUCHREV_BUILD_BLOCKER "Build TouchRev blocker hook and injector" OFF)
 option(TOUCHREV_BUILD_TOOLS "Build TouchRev development tools" ON)
 
+add_subdirectory(third_party/Win32Acrylic)
+
 add_executable(TouchRevGUI WIN32
     src/main.cpp
     TouchRevGUI.rc
@@ -88,6 +90,7 @@ if(MINGW)
 endif()
 
 target_link_libraries(TouchRevGUI PRIVATE
+    Win32Acrylic::composition
     user32
     gdi32
     dwmapi
@@ -152,6 +155,7 @@ add_custom_target(copy_touchrev_xaml ALL
         "${CMAKE_CURRENT_SOURCE_DIR}/src/appswitcher/xaml/AppSwitcherRoot.xaml"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/appswitcher/xaml/SwitcherItem.xaml"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/appswitcher/xaml/ConfigRoot.xaml"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/appswitcher/xaml/ThemeResources.xaml"
         "$<TARGET_FILE_DIR:TouchRevGUI>/xaml"
 )
 add_dependencies(TouchRevGUI copy_touchrev_xaml)

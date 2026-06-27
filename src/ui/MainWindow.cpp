@@ -421,7 +421,7 @@ HRESULT MainWindow::OnCreate()
         DebugLog(L"XAML AppSwitcher view initialization failed.");
         return E_FAIL;
     }
-    appSwitcherMainView_.ApplyTheme(themeManager_.Palette());
+    appSwitcherMainView_.ApplyTheme(themeManager_.Palette(), true);
  
     SetTimer(hwnd_, kGestureTimerId, kGestureTimerMs, nullptr);
 
@@ -517,7 +517,7 @@ void MainWindow::RefreshTheme()
     const bool changed = themeManager_.Refresh(hwnd_);
     if (changed)
     {
-        appSwitcherMainView_.ApplyTheme(themeManager_.PaletteForActivationState(activationSucceeded_));
+        appSwitcherMainView_.ApplyTheme(themeManager_.PaletteForActivationState(activationSucceeded_), activationSucceeded_);
     }
 }
 
@@ -526,7 +526,7 @@ void MainWindow::ApplyActivationVisualState(bool active)
     activationPending_ = false;
     activationSucceeded_ = active && GetForegroundWindow() == hwnd_;
     keyboardNavigationEnabled_ = activationSucceeded_;
-    appSwitcherMainView_.ApplyTheme(themeManager_.PaletteForActivationState(activationSucceeded_));
+    appSwitcherMainView_.ApplyTheme(themeManager_.PaletteForActivationState(activationSucceeded_), activationSucceeded_);
 }
 
 MainWindow::ActivationResult MainWindow::TryActivateSwitcher()
@@ -629,7 +629,7 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
         SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
     RefreshTheme();
-    appSwitcherMainView_.ApplyTheme(themeManager_.Palette());
+    appSwitcherMainView_.ApplyTheme(themeManager_.Palette(), true);
     ShowWindow(hwnd_, SW_SHOWNA);
     touchrev::common::dwm::SetWindowCloaked(hwnd_, false);
     isVisible_ = true;

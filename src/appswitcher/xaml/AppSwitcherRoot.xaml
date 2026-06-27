@@ -2,32 +2,40 @@
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
     x:Name="RootGrid"
-    Background="Transparent">
+    Background="{ThemeResource RootBackdropBrush}">
+
+    <Grid.Resources>
+        <ResourceDictionary>
+            <x:Double x:Key="PaddingDip">48</x:Double>
+            <x:Double x:Key="ItemGapDip">32</x:Double>
+            <x:Double x:Key="MinAspect">0.4</x:Double>
+            <x:Double x:Key="MaxAspect">2.5</x:Double>
+        </ResourceDictionary>
+    </Grid.Resources>
 
     <Canvas x:Name="LayoutCanvas">
-        <Border
-            x:Name="AppSwitcherBackdrop"
-            Canvas.ZIndex="0"
-            Background="Transparent"
-            CornerRadius="24" />
 
         <Border
             x:Name="AppSwitcherContainer"
             Canvas.ZIndex="1"
-            Background="#CC181818"
-            BorderBrush="#55FFFFFF"
+            Background="Transparent"
+            BorderBrush="{ThemeResource ContainerBorderBrush}"
             BorderThickness="1"
-            CornerRadius="24" />
+            CornerRadius="12" />
 
         <Border
             x:Name="FocusBorder"
-            BorderBrush="#FF4CC2FF"
+            BorderBrush="{ThemeResource FocusBorderBrush}"
             BorderThickness="4"
             Canvas.ZIndex="2"
             CornerRadius="20"
             IsHitTestVisible="False"
             Visibility="Collapsed"
-            Background="Transparent" />
+            Background="{ThemeResource FocusFillBrush}">
+            <Border.Resources>
+                <x:Double x:Key="InflationDip">10</x:Double>
+            </Border.Resources>
+        </Border>
     </Canvas>
 
     <Grid
@@ -42,14 +50,14 @@
                 HorizontalAlignment="Center"
                 FontFamily="Segoe MDL2 Assets"
                 FontSize="48"
-                Foreground="#88FFFFFF"
+                Foreground="{ThemeResource SecondaryTextBrush}"
                 Text="&#xE119;" />
             <TextBlock
                 x:Name="EmptyText"
                 Margin="0,12,0,0"
                 HorizontalAlignment="Center"
                 FontSize="18"
-                Foreground="#CCFFFFFF"
+                Foreground="{ThemeResource SecondaryTextBrush}"
                 Text="No switchable windows" />
         </StackPanel>
     </Grid>

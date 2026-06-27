@@ -5,6 +5,7 @@
 #include "common/PathUtils.h"
 #include "common/IconUtils.h"
 #include "common/XamlIslandCommon.h"
+#include "common/Win32Error.h"
 
 #include <winrt/Windows.UI.Xaml.Media.Imaging.h>
 #include <winrt/Windows.Graphics.Imaging.h>
@@ -66,6 +67,21 @@ std::unique_ptr<CardView> CardView::Create(
         const std::wstring xaml = touchrev::common::LoadTextFileUtf8(touchrev::common::ModuleRelativePath(kItemXamlPath));
         auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
         auto rootElement = object.as<winrt::Windows::UI::Xaml::FrameworkElement>();
+
+        try
+        {
+            constexpr wchar_t kThemeXamlPath[] = L"xaml/ThemeResources.xaml";
+            const std::wstring themeXaml = touchrev::common::LoadTextFileUtf8(touchrev::common::ModuleRelativePath(kThemeXamlPath));
+            if (!themeXaml.empty())
+            {
+                auto themeRes = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{themeXaml}).as<winrt::Windows::UI::Xaml::ResourceDictionary>();
+                rootElement.Resources().MergedDictionaries().Append(themeRes);
+            }
+        }
+        catch (const winrt::hresult_error& error)
+        {
+            DebugLogHResult(L"Load ThemeResources.xaml in CardView", error.code());
+        }
 
         auto item = std::make_unique<CardView>();
         if (item->Initialize(rootElement, palette, index, callbacks))
@@ -181,57 +197,30 @@ void CardView::ApplyRowWeights()
     }
 
     const auto rows = layoutGrid.RowDefinitions();
-    if (rows.Size() < 2)
+    if (rows.Size() >= 2)
     {
-        return;
+        titleRowWeight_ = rows.GetAt(0).Height().Value;
+        contentRowWeight_ = rows.GetAt(1).Height().Value;
     }
 
-    rows.GetAt(0).Height(winrt::Windows::UI::Xaml::GridLengthHelper::FromValueAndType(
-        LayoutEngine::TitleRowWeight,
-        winrt::Windows::UI::Xaml::GridUnitType::Star));
-    rows.GetAt(1).Height(winrt::Windows::UI::Xaml::GridLengthHelper::FromValueAndType(
-        LayoutEngine::ContentRowWeight,
-        winrt::Windows::UI::Xaml::GridUnitType::Star));
+    if (root)
+    {
+        auto res = root.Resources();
+        if (res.HasKey(winrt::box_value(L"PressedScale")))
+        {
+            pressedScale_ = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"PressedScale")));
+        }
+        if (res.HasKey(winrt::box_value(L"GrabbedScale")))
+        {
+            grabbedScale_ = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"GrabbedScale")));
+        }
+    }
 }
 
-void CardView::ApplyTheme(const AppSwitcherPalette& palette)
+void CardView::ApplyTheme(const AppSwitcherPalette& palette, bool /*active*/)
 {
     palette_ = palette;
-    if (mainCard)
-    {
-        mainCard.Background(Brush(palette.cardBackground));
-    }
-
     ApplyInteractionState(palette);
-
-    if (thumbnailHost)
-    {
-        thumbnailHost.Background(Brush(palette.contentBackground));
-    }
-
-    if (title)
-    {
-        title.Foreground(Brush(palette.primaryText));
-    }
-
-    if (defaultIcon)
-    {
-        defaultIcon.Foreground(Brush(palette.iconText));
-    }
-
-    if (closeButton)
-    {
-        closeButton.Foreground(Brush(palette.buttonText));
-        closeButton.Background(Brush(winrt::Windows::UI::Colors::Transparent()));
-
-        auto resources = closeButton.Resources();
-        resources.Insert(winrt::box_value(L"ButtonBackground"), Brush(winrt::Windows::UI::Colors::Transparent()));
-        resources.Insert(winrt::box_value(L"ButtonForeground"), Brush(palette.buttonText));
-        resources.Insert(winrt::box_value(L"ButtonBackgroundPointerOver"), Brush(palette.closeButtonHoverBackground));
-        resources.Insert(winrt::box_value(L"ButtonForegroundPointerOver"), Brush(palette.closeButtonHoverText));
-        resources.Insert(winrt::box_value(L"ButtonBackgroundPressed"), Brush(palette.closeButtonHoverBackground));
-        resources.Insert(winrt::box_value(L"ButtonForegroundPressed"), Brush(palette.closeButtonHoverText));
-    }
 }
 
 void CardView::ApplyInteractionState(const AppSwitcherPalette& palette)
@@ -244,18 +233,41 @@ void CardView::UpdateVisualState()
 {
     if (titleBorder)
     {
-        titleBorder.Background(Brush(hovered ? palette_.titleHoverBackground : palette_.titleBackground));
+        winrt::Windows::UI::Xaml::Media::Brush titleBrush{nullptr};
+        if (root)
+        {
+            auto res = root.Resources();
+            const auto key = hovered ? L"TitleHoverBackgroundBrush" : L"TitleBackgroundBrush";
+            if (res.HasKey(winrt::box_value(key)))
+            {
+                titleBrush = res.Lookup(winrt::box_value(key)).as<winrt::Windows::UI::Xaml::Media::Brush>();
+            }
+        }
+        if (titleBrush)
+        {
+            titleBorder.Background(titleBrush);
+        }
     }
 
     if (pressOverlay)
     {
         if (grabbed || pressed)
         {
-            const auto overlayColor = grabbed
-                                          ? palette_.cardGrabbedOverlay
-                                          : palette_.cardPressedOverlay;
-            pressOverlay.Background(Brush(overlayColor));
-            pressOverlay.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+            winrt::Windows::UI::Xaml::Media::Brush overlayBrush{nullptr};
+            if (root)
+            {
+                auto res = root.Resources();
+                const auto key = grabbed ? L"CardGrabbedOverlayBrush" : L"CardPressedOverlayBrush";
+                if (res.HasKey(winrt::box_value(key)))
+                {
+                    overlayBrush = res.Lookup(winrt::box_value(key)).as<winrt::Windows::UI::Xaml::Media::Brush>();
+                }
+            }
+            if (overlayBrush)
+            {
+                pressOverlay.Background(overlayBrush);
+                pressOverlay.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+            }
         }
         else
         {
@@ -265,15 +277,9 @@ void CardView::UpdateVisualState()
 
     if (transform)
     {
-        const double scale = grabbed ? 0.90 : pressed ? 0.985 : 1.0;
+        const double scale = grabbed ? grabbedScale_ : pressed ? pressedScale_ : 1.0;
         transform.ScaleX(scale);
         transform.ScaleY(scale);
-    }
-
-    if (closeButton)
-    {
-        closeButton.Background(Brush(closeButtonHovered ? palette_.closeButtonHoverBackground : winrt::Windows::UI::Colors::Transparent()));
-        closeButton.Foreground(Brush(closeButtonHovered ? palette_.closeButtonHoverText : palette_.buttonText));
     }
 }
 
@@ -468,9 +474,10 @@ void CardView::UpdateState(
     ApplyCloseButtonWidth(std::max(28.0, h * 0.18));
 
     const double thumbnailWidth = std::max(1.0, w);
+    const double totalWeight = titleRowWeight_ + contentRowWeight_;
     const double thumbnailHeight = std::max(
         1.0,
-        h * LayoutEngine::ContentRowWeight / LayoutEngine::TotalRowWeight);
+        h * contentRowWeight_ / (totalWeight > 0.0 ? totalWeight : 1.0));
     EnsureThumbnail(thumbnailManager, thumbnailWidth, thumbnailHeight, dpiScale);
 }
 

@@ -61,6 +61,9 @@ public:
     CardView() = default;
     ~CardView() { Destroy(); }
 
+    double TitleRowWeight() const { return titleRowWeight_; }
+    double ContentRowWeight() const { return contentRowWeight_; }
+
     CardView(CardView&&) noexcept = default;
     CardView& operator=(CardView&&) noexcept = default;
 
@@ -74,7 +77,7 @@ public:
         CardCallbacks callbacks);
 
     void ApplyRowWeights();
-    void ApplyTheme(const AppSwitcherPalette& palette);
+    void ApplyTheme(const AppSwitcherPalette& palette, bool active = true);
     void ApplyInteractionState(const AppSwitcherPalette& palette);
     void ClearThumbnail();
     void Reset(const AppSwitcherPalette& palette);
@@ -103,6 +106,11 @@ private:
     void UpdateVisualState();
     void Destroy();
     void LoadAppIcon();
+
+    double titleRowWeight_ = 1.8;
+    double contentRowWeight_ = 8.2;
+    double pressedScale_ = 0.985;
+    double grabbedScale_ = 0.90;
 };
 }
 
