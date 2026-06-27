@@ -1,6 +1,6 @@
 #include "common/log.h"
 #include "common/winutil.h"
-#include "hookdll/hooks.h"
+#include "hookdll/twinui_gesture_table_patch.h"
 
 #include <windows.h>
 
@@ -16,7 +16,7 @@ DWORD WINAPI InitializeHookThread(LPVOID module) {
                          L"event=INIT arch=%s module=0x%p",
                          touchrev::CurrentBuildArchName(), module);
 
-    if (touchrev::InstallHooks()) {
+    if (touchrev::InstallTwinuiGestureTablePatch()) {
         touchrev::LogMessage(L"hookdll", touchrev::LogLevel::Info,
                              L"event=READY");
     } else {
@@ -42,7 +42,7 @@ BOOL APIENTRY DllMain(HMODULE module, DWORD reason, LPVOID reserved) {
     }
     case DLL_PROCESS_DETACH:
         if (reserved == nullptr) {
-            touchrev::UninstallHooks();
+            touchrev::UninstallTwinuiGestureTablePatch();
         }
         touchrev::LogMessage(L"hookdll", touchrev::LogLevel::Info,
                              L"event=UNINIT processTerminating=%d",

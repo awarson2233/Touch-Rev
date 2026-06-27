@@ -476,6 +476,44 @@ bool QueryLoadedPdbInfo(DWORD64 base, IMAGEHLP_MODULEW64* moduleInfo) {
     return SymGetModuleInfoW64(g_symbolSession, base, moduleInfo) != FALSE;
 }
 
+bool VerifyLoadedPdbIdentityWithEvent(const DirectHookSpec& spec,
+                                      HMODULE module,
+                                      const PdbIdentity& identity,
+                                      PCWSTR matchEvent,
+                                      PCWSTR mismatchEvent,
+                                      DbgHelpSymbolResolveResult* result) {
+    IMAGEHLP_MODULEW64 moduleInfo{};
+    DWORD64 base = reinterpret_cast<DWORD64>(module);
+    if (!QueryLoadedPdbInfo(base, &moduleInfo)) {
+        DWORD error = GetLastError();
+        LogMessage(L"hookdll", LogLevel::Warning,
+                   L"event=PDB_LOADED_INFO_FAILED api=%s moduleName=%s module=0x%p error=%lu message=%s",
+                   ApiName(spec), SafeString(spec.moduleName), module, error,
+                   FormatLastError(error).c_str());
+        if (result) {
+            result->error = error;
+        }
+        return false;
+    }
+
+    bool matches = PdbInfoMatchesIdentity(moduleInfo, identity);
+    LogMessage(L"hookdll", matches ? LogLevel::Info : LogLevel::Warning,
+               L"event=%s api=%s moduleName=%s module=0x%p expectedPdb=%s expectedGuid=%s expectedAge=%lu loadedPdb=%s loadedGuid=%s loadedAge=%lu pdbUnmatched=%d dbgUnmatched=%d symType=%lu",
+               matches ? SafeString(matchEvent) : SafeString(mismatchEvent),
+               ApiName(spec), SafeString(spec.moduleName), module,
+               identity.pdbName.c_str(), GuidToString(identity.guid).c_str(),
+               identity.age, moduleInfo.LoadedPdbName,
+               GuidToString(moduleInfo.PdbSig70).c_str(), moduleInfo.PdbAge,
+               moduleInfo.PdbUnmatched ? 1 : 0,
+               moduleInfo.DbgUnmatched ? 1 : 0,
+               static_cast<unsigned long>(moduleInfo.SymType));
+
+    if (!matches && result) {
+        result->error = ERROR_INVALID_DATA;
+    }
+    return matches;
+}
+
 std::wstring PdbFileNameFromIdentity(const PdbIdentity& identity) {
     std::wstring pdbFileName = GetFileNameFromPath(identity.pdbName);
     return pdbFileName.empty() ? identity.pdbName : pdbFileName;
@@ -798,6 +836,30 @@ bool LoadModuleSymbolsFromExactPdb(const DirectHookSpec& spec,
     return true;
 }
 
+bool LoadAndVerifyExactPdb(const DirectHookSpec& spec,
+                           HMODULE module,
+                           const PdbIdentity& identity,
+                           const std::wstring& foundPdbPath,
+                           PCWSTR mode,
+                           DbgHelpSymbolResolveResult* result) {
+    if (!LoadModuleSymbolsFromExactPdb(spec, module, foundPdbPath, result)) {
+        return false;
+    }
+
+    if (VerifyLoadedPdbIdentityWithEvent(spec, module, identity,
+                                         L"PDB_EXACT_LOAD_MATCH",
+                                         L"PDB_EXACT_LOAD_MISMATCH", result)) {
+        return true;
+    }
+
+    UnloadModuleSymbols(reinterpret_cast<DWORD64>(module));
+    LogMessage(L"hookdll", LogLevel::Warning,
+               L"event=PDB_EXACT_LOAD_REJECTED api=%s moduleName=%s module=0x%p mode=%s pdb=%s",
+               ApiName(spec), SafeString(spec.moduleName), module,
+               SafeString(mode), foundPdbPath.c_str());
+    return false;
+}
+
 bool EnsureExactSymbolsLoaded(const DirectHookSpec& spec,
                               HMODULE module,
                               PdbIdentity* identity,
@@ -846,25 +908,53 @@ bool EnsureExactSymbolsLoaded(const DirectHookSpec& spec,
                    PdbFileNameFromIdentity(currentIdentity).c_str(),
                    GuidToString(currentIdentity.guid).c_str(), currentIdentity.age,
                    foundPdbPath.c_str());
-    } else {
-        LogMessage(L"hookdll", LogLevel::Info,
-                   L"event=PDB_CACHE_MISS api=%s moduleName=%s module=0x%p pdb=%s guid=%s age=%lu path=%s",
+
+        if (LoadAndVerifyExactPdb(spec, module, currentIdentity, foundPdbPath,
+                                  L"cache", result)) {
+            if (identity) {
+                *identity = currentIdentity;
+            }
+            return true;
+        }
+
+        DWORD deleteError = ERROR_SUCCESS;
+        if (!DeleteFileW(foundPdbPath.c_str())) {
+            deleteError = GetLastError();
+            if (deleteError != ERROR_FILE_NOT_FOUND) {
+                LogMessage(L"hookdll", LogLevel::Warning,
+                           L"event=PDB_CACHE_DELETE_FAILED api=%s moduleName=%s module=0x%p path=%s error=%lu message=%s",
+                           ApiName(spec), SafeString(spec.moduleName), module,
+                           foundPdbPath.c_str(), deleteError,
+                           FormatLastError(deleteError).c_str());
+            }
+        }
+
+        LogMessage(L"hookdll", LogLevel::Warning,
+                   L"event=PDB_CACHE_INVALID api=%s moduleName=%s module=0x%p pdb=%s guid=%s age=%lu path=%s action=redownload",
                    ApiName(spec), SafeString(spec.moduleName), module,
                    PdbFileNameFromIdentity(currentIdentity).c_str(),
                    GuidToString(currentIdentity.guid).c_str(), currentIdentity.age,
                    foundPdbPath.c_str());
-
-        DWORD error = ERROR_SUCCESS;
-        if (!DownloadPdbFromMicrosoft(spec, module, currentIdentity, foundPdbPath,
-                                      &error)) {
-            if (result) {
-                result->error = error == ERROR_SUCCESS ? ERROR_FILE_NOT_FOUND : error;
-            }
-            return false;
-        }
+    } else {
+        LogMessage(L"hookdll", LogLevel::Info,
+                   L"event=PDB_CACHE_MISS api=%s moduleName=%s module=0x%p pdb=%s guid=%s age=%lu path=%s action=download",
+                   ApiName(spec), SafeString(spec.moduleName), module,
+                   PdbFileNameFromIdentity(currentIdentity).c_str(),
+                   GuidToString(currentIdentity.guid).c_str(), currentIdentity.age,
+                   foundPdbPath.c_str());
     }
 
-    if (!LoadModuleSymbolsFromExactPdb(spec, module, foundPdbPath, result)) {
+    DWORD error = ERROR_SUCCESS;
+    if (!DownloadPdbFromMicrosoft(spec, module, currentIdentity, foundPdbPath,
+                                  &error)) {
+        if (result) {
+            result->error = error == ERROR_SUCCESS ? ERROR_FILE_NOT_FOUND : error;
+        }
+        return false;
+    }
+
+    if (!LoadAndVerifyExactPdb(spec, module, currentIdentity, foundPdbPath,
+                               L"download", result)) {
         return false;
     }
 
@@ -878,33 +968,9 @@ bool VerifyLoadedPdbIdentity(const DirectHookSpec& spec,
                              HMODULE module,
                              const PdbIdentity& identity,
                              DbgHelpSymbolResolveResult* result) {
-    IMAGEHLP_MODULEW64 moduleInfo{};
-    DWORD64 base = reinterpret_cast<DWORD64>(module);
-    if (!QueryLoadedPdbInfo(base, &moduleInfo)) {
-        DWORD error = GetLastError();
-        LogMessage(L"hookdll", LogLevel::Warning,
-                   L"event=PDB_LOADED_INFO_FAILED api=%s moduleName=%s module=0x%p "
-                   L"error=%lu message=%s",
-                   ApiName(spec), SafeString(spec.moduleName), module, error,
-                   FormatLastError(error).c_str());
-        if (result) {
-            result->error = error;
-        }
-        return false;
-    }
-
-    bool matches = PdbInfoMatchesIdentity(moduleInfo, identity);
-    LogMessage(L"hookdll", matches ? LogLevel::Info : LogLevel::Warning,
-               matches ? L"event=PDB_LOADED_MATCH api=%s moduleName=%s module=0x%p pdb=%s guid=%s age=%lu loadedPdb=%s"
-                       : L"event=PDB_LOADED_MISMATCH api=%s moduleName=%s module=0x%p pdb=%s guid=%s age=%lu loadedPdb=%s",
-               ApiName(spec), SafeString(spec.moduleName), module,
-               identity.pdbName.c_str(), GuidToString(identity.guid).c_str(),
-               identity.age, moduleInfo.LoadedPdbName);
-
-    if (!matches && result) {
-        result->error = ERROR_INVALID_DATA;
-    }
-    return matches;
+    return VerifyLoadedPdbIdentityWithEvent(spec, module, identity,
+                                            L"PDB_LOADED_MATCH",
+                                            L"PDB_LOADED_MISMATCH", result);
 }
 
 bool TryAcceptSymbolAddress(const DirectHookSpec& spec,
