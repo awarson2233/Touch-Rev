@@ -1,6 +1,6 @@
 #include "MainWindow.h"
 
-#include "appswitcher/WindowController.h"
+#include "WindowController.h"
 #include "common/Win32Error.h"
 #include "common/AppSettings.h"
 #include "common/DwmUtils.h"

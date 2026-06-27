@@ -2,7 +2,7 @@
 
 #include "ThinXamlAppSwitcherHost.h"
 #include "ThemeManager.h"
-#include "appswitcher/MainView.h"
+#include "MainView.h"
 #include "common/CoordinateSpace.h"
 #include "input/InputController.h"
 
