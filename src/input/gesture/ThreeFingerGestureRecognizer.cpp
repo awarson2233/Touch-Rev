@@ -1,220 +1,70 @@
 #include "input/gesture/ThreeFingerGestureRecognizer.h"
 
-#include "common/Win32Error.h"
-
-#include <windows.h>
-
 #include <algorithm>
 #include <cmath>
-#include <sstream>
 
 namespace
 {
 constexpr double kMaxFingerDistance = 800.0;
-constexpr double kLongPressThresholdMs = 400.0;
-constexpr double kTapMoveThreshold = 30.0;
 constexpr double kMoveEpsilon = 0.1;
-constexpr double kTapMaxDurationMs = 400.0;
-constexpr double kMinDoubleTapIntervalMs = 100.0;
-constexpr double kDoubleTapIntervalMs = 450.0;
-constexpr double kDoubleTapDistance = 150.0;
-constexpr double kMaxStartMovement = 40.0;
+constexpr double kFastTrackTapMaxDurationMs = 500.0;
 }
 
 ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(const RawTouchInput::Frame& frame)
 {
-    UpdateActiveSnapshot(frame);
-    std::array<FingerPoint, 3> fingers{};
-    const bool threeFingerActive = TryExtractThreeFingers(fingers);
-    const std::int64_t now = CounterNow();
+    const std::vector<touchrev::gesture::GestureContactEvent> events = contactTracker_.ProcessFrame(frame);
+    std::optional<touchrev::gesture::GestureRecognitionResult> selectedResult;
+    std::optional<touchrev::gesture::GestureRecognitionResult> accumulatedMoveResult;
 
-    // 缓存原始触摸坐标（用于 Tick 触发时计算触摸中心）
-    if (threeFingerActive)
+    for (const touchrev::gesture::GestureContactEvent& event : events)
     {
-        lastRawCenterX_ = static_cast<LONG>((fingers[0].point.x + fingers[1].point.x + fingers[2].point.x) / 3.0 * 10.0);
-        lastRawCenterY_ = static_cast<LONG>((fingers[0].point.y + fingers[1].point.y + fingers[2].point.y) / 3.0 * 10.0);
-        hasLastRawCenter_ = true;
-    }
-
-    if (!threeFingerActive)
-    {
-        if (state_ == State::Candidate)
+        std::optional<touchrev::gesture::GestureRecognitionResult> result = ProcessContactEvent(event);
+        if (!result.has_value())
         {
-            const Result result = FinishCandidateTap(lastCenter_, lastDistances_, lastFingers_);
-            state_ = State::Idle;
-            hasCandidateIds_ = false;
-            return result;
+            continue;
         }
 
-        if (state_ == State::LongPressActive)
+        const bool isLongPressUpdate = result->type == touchrev::gesture::GestureType::ThreeFingerLongPress &&
+                                       result->phase == touchrev::gesture::GesturePhase::Update;
+        if (isLongPressUpdate)
         {
-            // 降级容错：检查是否是临时 ID 断开（仍有 2+ 个原始 ID 的手指）
-            if (PartiallyMatchesCandidateIds() && activeFingers_.size() >= 2)
+            if (!accumulatedMoveResult.has_value())
             {
-                // 使用剩余手指的中心继续跟踪（降级模式）
-                Point center = CalculateCenterFromActive();
-
-                // 更新缓存的原始坐标
-                lastRawCenterX_ = 0;
-                lastRawCenterY_ = 0;
-                for (const auto& finger : activeFingers_)
-                {
-                    lastRawCenterX_ += static_cast<LONG>(finger.point.x * 10.0);
-                    lastRawCenterY_ += static_cast<LONG>(finger.point.y * 10.0);
-                }
-                lastRawCenterX_ /= static_cast<LONG>(activeFingers_.size());
-                lastRawCenterY_ /= static_cast<LONG>(activeFingers_.size());
-                hasLastRawCenter_ = true;
-
-                const Point frameDelta{center.x - lastCenter_.x, center.y - lastCenter_.y};
-                const EventType type = std::hypot(frameDelta.x, frameDelta.y) >= kMoveEpsilon
-                                           ? EventType::LongPressMoved
-                                           : EventType::LongPressHolding;
-                lastCenter_ = center;
-
-                std::wstringstream log;
-                log << L"[Gesture] Degraded mode: tracking with " << activeFingers_.size() << L" fingers";
-                DebugLog(log.str());
-
-                // 构造虚拟的 3 指数组（用于兼容 MakeResult）
-                std::array<FingerPoint, 3> degradedFingers{};
-                for (size_t i = 0; i < std::min(activeFingers_.size(), size_t(3)); ++i)
-                {
-                    degradedFingers[i] = activeFingers_[i];
-                }
-
-                return MakeResult(type, true, true, center, frameDelta, {}, degradedFingers);
-            }
-
-            // 真正终止：手指完全消失或出现不匹配的新 ID
-            std::wstringstream log;
-            log << L"[Gesture] LongPress ended: finger count=" << activeFingers_.size()
-                << L" partialMatch=" << (PartiallyMatchesCandidateIds() ? L"true" : L"false");
-            DebugLog(log.str());
-
-            state_ = State::Idle;
-            hasCandidateIds_ = false;
-            return MakeResult(EventType::LongPressEnded, false, false, lastCenter_, {}, {}, fingers);
-        }
-
-        state_ = State::Idle;
-        hasCandidateIds_ = false;
-        return MakeResult(EventType::None, false, false, lastCenter_, {}, {}, fingers);
-    }
-
-    const Distances distances = CalculateDistances(fingers);
-    const bool sameHand = IsSameHand(distances);
-    lastFingers_ = fingers;
-    const Point center = Center(fingers);
-
-    if (!sameHand)
-    {
-        if (state_ == State::LongPressActive)
-        {
-            std::wstringstream log;
-            log << L"[Gesture] LongPress ended: hand spread too wide. Max distance: " << distances.max << L" (limit: 800)";
-            DebugLog(log.str());
-
-            state_ = State::Idle;
-            hasCandidateIds_ = false;
-            return MakeResult(EventType::LongPressEnded, true, false, center, {}, distances, fingers);
-        }
-
-        state_ = State::Idle;
-        hasCandidateIds_ = false;
-        return MakeResult(EventType::None, true, false, center, {}, distances, fingers);
-    }
-
-    if (state_ == State::Idle)
-    {
-        state_ = State::Candidate;
-        StoreCandidateIds(fingers);
-        candidateStartQpc_ = now;
-        candidateStartCenter_ = center;
-        lastCenter_ = center;
-        return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
-    }
-
-    if (!MatchesCandidateIds(fingers))
-    {
-        std::wstringstream log;
-        log << L"[Gesture] ID mismatch, resetting state. Current IDs: "
-            << fingers[0].id << L", " << fingers[1].id << L", " << fingers[2].id;
-        if (hasCandidateIds_)
-        {
-            log << L" Expected: " << candidateIds_[0] << L", " << candidateIds_[1] << L", " << candidateIds_[2];
-        }
-        log << L" State: " << static_cast<int>(state_);
-        DebugLog(log.str());
-
-        state_ = State::Candidate;
-        StoreCandidateIds(fingers);
-        candidateStartQpc_ = now;
-        candidateStartCenter_ = center;
-        lastCenter_ = center;
-        return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
-    }
-
-    Point deltaFromStart{};
-    if (!TryAverageDeltaById(candidateStartFingers_, fingers, deltaFromStart))
-    {
-        state_ = State::Candidate;
-        StoreCandidateIds(fingers);
-        candidateStartQpc_ = now;
-        candidateStartCenter_ = center;
-        lastCenter_ = center;
-        return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
-    }
-
-    if (state_ == State::Tracking)
-    {
-        lastCenter_ = center;
-        return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
-    }
-
-    if (state_ == State::Candidate)
-    {
-        const double distFromAnchor = Distance(candidateStartCenter_, center);
-        if (distFromAnchor > kMaxStartMovement * 2.4)
-        {
-            state_ = State::Tracking;
-            lastCenter_ = center;
-            return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
-        }
-
-        if (CounterMs(now - candidateStartQpc_) >= kLongPressThresholdMs)
-        {
-            if (distFromAnchor <= kMaxStartMovement * 1.5)
-            {
-                DebugLog(L"[Gesture] LongPressStarted triggered");
-                state_ = State::LongPressActive;
-                lastCenter_ = center;
-                return MakeResult(EventType::LongPressStarted, true, true, center, {0.0, 0.0}, distances, fingers);
+                accumulatedMoveResult = std::move(result);
             }
             else
             {
-                std::wstringstream log;
-                log << L"[Gesture] Movement too large for long press: " << distFromAnchor << L" (limit: " << (kMaxStartMovement * 1.5) << L")";
-                DebugLog(log.str());
-
-                state_ = State::Tracking;
-                lastCenter_ = center;
-                return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
+                accumulatedMoveResult->delta.x += result->delta.x;
+                accumulatedMoveResult->delta.y += result->delta.y;
+                accumulatedMoveResult->center = result->center;
+                accumulatedMoveResult->contacts = std::move(result->contacts);
+                accumulatedMoveResult->timestamp = result->timestamp;
             }
+            continue;
         }
 
-        lastCenter_ = center;
-        return MakeResult(EventType::None, true, true, center, {}, distances, fingers);
+        if (!selectedResult.has_value())
+        {
+            selectedResult = std::move(result);
+            continue;
+        }
+
+        const bool selectedIsBegin = selectedResult->type == touchrev::gesture::GestureType::ThreeFingerLongPress &&
+                                     selectedResult->phase == touchrev::gesture::GesturePhase::Begin;
+        if (!selectedIsBegin)
+        {
+            selectedResult = std::move(result);
+        }
     }
 
-    if (state_ == State::LongPressActive)
+    if (selectedResult.has_value())
     {
-        const Point frameDelta{center.x - lastCenter_.x, center.y - lastCenter_.y};
-        const EventType type = std::hypot(frameDelta.x, frameDelta.y) >= kMoveEpsilon
-                                   ? EventType::LongPressMoved
-                                   : EventType::LongPressHolding;
-        lastCenter_ = center;
-        return MakeResult(type, true, true, center, frameDelta, distances, fingers);
+        return ConvertResult(*selectedResult);
+    }
+
+    if (accumulatedMoveResult.has_value())
+    {
+        return ConvertResult(*accumulatedMoveResult);
     }
 
     return {};
@@ -222,34 +72,27 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ProcessFrame(
 
 ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::Tick()
 {
-    const std::int64_t now = CounterNow();
-    std::array<FingerPoint, 3> fingers{};
-    TryExtractThreeFingers(fingers);
-
-    if (state_ == State::Candidate && lastThreeFingerActive_ && lastSameHand_)
+    if (!session_)
     {
-        const double distFromAnchor = Distance(candidateStartCenter_, lastCenter_);
-        if (distFromAnchor > kMaxStartMovement * 2.4)
-        {
-            state_ = State::Tracking;
-        }
-        else if (CounterMs(now - candidateStartQpc_) >= kLongPressThresholdMs)
-        {
-            if (distFromAnchor <= kMaxStartMovement * 1.5)
-            {
-                state_ = State::LongPressActive;
-                return MakeResult(EventType::LongPressStarted, true, true, lastCenter_, {0.0, 0.0}, lastDistances_, fingers);
-            }
-            else
-            {
-                state_ = State::Tracking;
-            }
-        }
+        return {};
     }
 
-    if (state_ == State::LongPressActive && lastThreeFingerActive_ && lastSameHand_)
+    session_->SetCurrentTimestamp(touchrev::gesture::CounterNow());
+
+    std::optional<touchrev::gesture::GestureRecognitionResult> result;
+    if (session_->Phase() == touchrev::gesture::GestureSessionPhase::Pending)
     {
-        return MakeResult(EventType::LongPressHolding, true, true, lastCenter_, {0.0, 0.0}, lastDistances_, fingers);
+        result = HandlePendingPhase();
+    }
+
+    if (!result.has_value() && session_ && session_->Phase() == touchrev::gesture::GestureSessionPhase::Active)
+    {
+        result = HandleActivePhase();
+    }
+
+    if (result.has_value())
+    {
+        return ConvertResult(*result);
     }
 
     return {};
@@ -257,56 +100,26 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::Tick()
 
 void ThreeFingerGestureRecognizer::Reset()
 {
-    state_ = State::Idle;
-    candidateIds_ = {};
-    candidateStartFingers_ = {};
-    hasCandidateIds_ = false;
-    activeFingers_.clear();
-    candidateStartQpc_ = 0;
-    candidateStartCenter_ = {};
+    contactTracker_.Reset();
+    session_.reset();
+    longPressRecognizer_.Reset();
+    tapRecognizer_.ResetAll();
+    recognizersBegun_ = false;
+    sessionStartIds_ = {};
+    hasSessionStartIds_ = false;
     lastCenter_ = {};
     lastDelta_ = {};
     lastDistances_ = {};
-    lastFingers_ = {};
     lastThreeFingerActive_ = false;
     lastSameHand_ = false;
     lastRawCenterX_ = 0;
     lastRawCenterY_ = 0;
     hasLastRawCenter_ = false;
-    hasFirstTap_ = false;
-    firstTapQpc_ = 0;
-    firstTapCenter_ = {};
-}
-
-std::int64_t ThreeFingerGestureRecognizer::CounterNow()
-{
-    LARGE_INTEGER counter{};
-    QueryPerformanceCounter(&counter);
-    return counter.QuadPart;
-}
-
-double ThreeFingerGestureRecognizer::CounterMs(std::int64_t delta)
-{
-    static const double frequency = []() {
-        LARGE_INTEGER value{};
-        QueryPerformanceFrequency(&value);
-        return static_cast<double>(value.QuadPart);
-    }();
-
-    return static_cast<double>(delta) * 1000.0 / frequency;
 }
 
 double ThreeFingerGestureRecognizer::Distance(Point a, Point b)
 {
     return std::hypot(a.x - b.x, a.y - b.y);
-}
-
-ThreeFingerGestureRecognizer::Point ThreeFingerGestureRecognizer::Center(const std::array<FingerPoint, 3>& fingers)
-{
-    return {
-        (fingers[0].point.x + fingers[1].point.x + fingers[2].point.x) / 3.0,
-        (fingers[0].point.y + fingers[1].point.y + fingers[2].point.y) / 3.0,
-    };
 }
 
 ThreeFingerGestureRecognizer::Distances ThreeFingerGestureRecognizer::CalculateDistances(const std::array<FingerPoint, 3>& fingers)
@@ -326,176 +139,244 @@ bool ThreeFingerGestureRecognizer::IsSameHand(const Distances& distances)
     return distances.max <= kMaxFingerDistance;
 }
 
-bool ThreeFingerGestureRecognizer::TryAverageDeltaById(
-    const std::array<FingerPoint, 3>& start,
-    const std::array<FingerPoint, 3>& current,
-    Point& delta)
+std::optional<touchrev::gesture::GestureRecognitionResult> ThreeFingerGestureRecognizer::ProcessContactEvent(
+    const touchrev::gesture::GestureContactEvent& event)
 {
-    Point sum{};
-    for (const FingerPoint& startFinger : start)
+    if (!session_ && event.kind != touchrev::gesture::GestureContactEvent::Kind::Started)
     {
-        const auto currentFinger = std::find_if(current.begin(), current.end(), [id = startFinger.id](const FingerPoint& finger) {
-            return finger.id == id;
-        });
-        if (currentFinger == current.end())
+        return std::nullopt;
+    }
+
+    if (!session_)
+    {
+        session_ = std::make_unique<touchrev::gesture::GestureSession>(event.contact.timestamp);
+        ResetRecognizersForSession();
+        sessionStartIds_ = {};
+        hasSessionStartIds_ = false;
+    }
+
+    switch (event.kind)
+    {
+    case touchrev::gesture::GestureContactEvent::Kind::Started:
+        session_->AddContact(event.contact);
+        if (session_->Phase() == touchrev::gesture::GestureSessionPhase::Active &&
+            !session_->GestureRecognized &&
+            session_->DurationMs() < 100.0 &&
+            session_->TryUpgradeFingerCount(session_->CurrentFingerCount()))
         {
-            return false;
+            ResetRecognizersForSession();
+            if (session_->LockedFingerCount() == 3)
+            {
+                BeginRecognizers();
+            }
+        }
+        break;
+    case touchrev::gesture::GestureContactEvent::Kind::Updated:
+        session_->UpdateContact(event.contact);
+        break;
+    case touchrev::gesture::GestureContactEvent::Kind::Ended:
+        session_->RemoveContact(event.contact);
+        break;
+    }
+
+    if (session_->IsAllFingersUp())
+    {
+        if (session_->Phase() == touchrev::gesture::GestureSessionPhase::Pending &&
+            session_->PeakFingerCount() >= touchrev::gesture::GestureSession::kMinFingerCount &&
+            session_->DurationMs() < kFastTrackTapMaxDurationMs)
+        {
+            if (session_->TryActivate() && session_->LockedFingerCount() == 3)
+            {
+                BeginRecognizers();
+            }
         }
 
-        sum.x += currentFinger->point.x - startFinger.point.x;
-        sum.y += currentFinger->point.y - startFinger.point.y;
+        return FinalizeSession(touchrev::gesture::GestureEndReason::AllFingersUp);
     }
 
-    delta = {sum.x / 3.0, sum.y / 3.0};
-    return true;
+    if (session_->Phase() == touchrev::gesture::GestureSessionPhase::Pending)
+    {
+        return HandlePendingPhase();
+    }
+
+    if (session_->Phase() == touchrev::gesture::GestureSessionPhase::Active)
+    {
+        return HandleActivePhase();
+    }
+
+    return std::nullopt;
 }
 
-void ThreeFingerGestureRecognizer::UpdateActiveSnapshot(const RawTouchInput::Frame& frame)
+std::optional<touchrev::gesture::GestureRecognitionResult> ThreeFingerGestureRecognizer::HandlePendingPhase()
 {
-    if (frame.frameSync && frame.contactCount == 0)
+    if (!session_)
     {
-        activeFingers_.clear();
-        return;
+        return std::nullopt;
     }
 
-    for (const RawTouchInput::TouchPoint& point : frame.points)
+    if (session_->IsRecognitionTimedOut())
     {
-        auto it = std::find_if(activeFingers_.begin(), activeFingers_.end(), [id = point.contactId](const FingerPoint& fp) {
-            return fp.id == id;
-        });
+        return FinalizeSession(touchrev::gesture::GestureEndReason::RecognitionTimeout);
+    }
 
-        if (!point.active || point.state == RawTouchInput::PointState::Released)
+    if (!session_->TryActivate())
+    {
+        return std::nullopt;
+    }
+
+    if (session_->LockedFingerCount() == 3)
+    {
+        BeginRecognizers();
+    }
+
+    return std::nullopt;
+}
+
+std::optional<touchrev::gesture::GestureRecognitionResult> ThreeFingerGestureRecognizer::HandleActivePhase()
+{
+    if (!session_)
+    {
+        return std::nullopt;
+    }
+
+    if (session_->IsFingerDropToleranceExpired(MinimumFingerQuorum()))
+    {
+        return FinalizeSession(touchrev::gesture::GestureEndReason::QuorumLostTimeout);
+    }
+
+    if (!recognizersBegun_ || session_->LockedFingerCount() != 3)
+    {
+        return std::nullopt;
+    }
+
+    const touchrev::gesture::GestureContext context = session_->BuildContext();
+    std::optional<touchrev::gesture::GestureRecognitionResult> result = longPressRecognizer_.OnUpdate(context);
+    if (result.has_value())
+    {
+        session_->GestureRecognized = true;
+        session_->ActiveGestureType = result->type;
+        return result;
+    }
+
+    tapRecognizer_.OnUpdate(context);
+    return std::nullopt;
+}
+
+std::optional<touchrev::gesture::GestureRecognitionResult> ThreeFingerGestureRecognizer::FinalizeSession(
+    touchrev::gesture::GestureEndReason)
+{
+    if (!session_)
+    {
+        return std::nullopt;
+    }
+
+    std::optional<touchrev::gesture::GestureRecognitionResult> result;
+    const bool wasActive = session_->Phase() == touchrev::gesture::GestureSessionPhase::Active;
+    if (wasActive && recognizersBegun_ && session_->LockedFingerCount() == 3)
+    {
+        const touchrev::gesture::GestureContext context = session_->BuildContext(true);
+        result = longPressRecognizer_.OnEnd(context);
+        if (!result.has_value())
         {
-            if (it != activeFingers_.end())
-            {
-                activeFingers_.erase(it);
-            }
+            result = tapRecognizer_.OnEnd(context);
+        }
+
+        if (result.has_value())
+        {
+            session_->GestureRecognized = true;
+            session_->ActiveGestureType = result->type;
+            session_->Complete();
         }
         else
         {
-            FingerPoint fp{
-                .id = point.contactId,
-                .point = {static_cast<double>(point.x) * 0.1, static_cast<double>(point.y) * 0.1},
-            };
-            if (it != activeFingers_.end())
-            {
-                *it = fp;
-            }
-            else
-            {
-                activeFingers_.push_back(fp);
-            }
+            session_->Cancel();
         }
     }
+    else
+    {
+        longPressRecognizer_.Reset();
+        tapRecognizer_.ResetCurrentSession();
+        session_->Cancel();
+    }
 
-    std::sort(activeFingers_.begin(), activeFingers_.end(), [](const FingerPoint& a, const FingerPoint& b) {
-        return a.id < b.id;
-    });
+    session_.reset();
+    recognizersBegun_ = false;
+    return result;
 }
 
-bool ThreeFingerGestureRecognizer::TryExtractThreeFingers(std::array<FingerPoint, 3>& fingers) const
+void ThreeFingerGestureRecognizer::BeginRecognizers()
 {
-    if (activeFingers_.size() != 3)
+    if (!session_ || session_->LockedFingerCount() != 3)
     {
-        return false;
+        return;
     }
 
-    fingers = {activeFingers_[0], activeFingers_[1], activeFingers_[2]};
-    return true;
+    const touchrev::gesture::GestureContext context = session_->BuildContext(true);
+    CaptureSessionStartIds(context.Contacts());
+    ResetRecognizersForSession();
+    longPressRecognizer_.OnBegin(context);
+    tapRecognizer_.OnBegin(context);
+    recognizersBegun_ = true;
 }
 
-bool ThreeFingerGestureRecognizer::MatchesCandidateIds(const std::array<FingerPoint, 3>& fingers) const
+void ThreeFingerGestureRecognizer::ResetRecognizersForSession()
 {
-    if (!hasCandidateIds_)
-    {
-        return false;
-    }
+    longPressRecognizer_.Reset();
+    tapRecognizer_.ResetCurrentSession();
+    recognizersBegun_ = false;
+}
 
-    std::array<DWORD, 3> current{fingers[0].id, fingers[1].id, fingers[2].id};
-    auto expected = candidateIds_;
-    std::sort(current.begin(), current.end());
-    std::sort(expected.begin(), expected.end());
+int ThreeFingerGestureRecognizer::MinimumFingerQuorum() const
+{
+    return session_ && session_->LockedFingerCount() > 0
+               ? session_->LockedFingerCount()
+               : touchrev::gesture::GestureSession::kMinFingerCount;
+}
 
-    // 精确匹配
-    if (current == expected)
+ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::ConvertResult(
+    const touchrev::gesture::GestureRecognitionResult& result)
+{
+    EventType type = EventType::None;
+    if (result.type == touchrev::gesture::GestureType::ThreeFingerLongPress)
     {
-        return true;
-    }
-
-    // 容错模式：允许最多 1 个 ID 变化（应对硬件报告不稳定）
-    // 统计不匹配的 ID 数量
-    int mismatchCount = 0;
-    for (size_t i = 0; i < 3; ++i)
-    {
-        if (std::find(expected.begin(), expected.end(), current[i]) == expected.end())
+        switch (result.phase)
         {
-            ++mismatchCount;
+        case touchrev::gesture::GesturePhase::Begin:
+            type = EventType::LongPressStarted;
+            break;
+        case touchrev::gesture::GesturePhase::Update:
+            type = std::hypot(result.delta.x, result.delta.y) >= kMoveEpsilon
+                       ? EventType::LongPressMoved
+                       : EventType::LongPressHolding;
+            break;
+        case touchrev::gesture::GesturePhase::End:
+            type = EventType::LongPressEnded;
+            break;
+        case touchrev::gesture::GesturePhase::Cancelled:
+            type = EventType::None;
+            break;
         }
     }
-
-    // 如果只有 1 个 ID 变化，且处于长按状态，则容忍并继续跟踪
-    if (mismatchCount <= 1 && state_ == State::LongPressActive)
+    else if (result.type == touchrev::gesture::GestureType::ThreeFingerDoubleTap)
     {
-        std::wstringstream log;
-        log << L"[Gesture] ID tolerance: mismatchCount=" << mismatchCount
-            << L" current=[" << current[0] << L"," << current[1] << L"," << current[2] << L"]"
-            << L" expected=[" << expected[0] << L"," << expected[1] << L"," << expected[2] << L"]";
-        DebugLog(log.str());
-        return true;
+        type = EventType::DoubleTap;
     }
 
-    return false;
-}
+    UpdateRawCenterCache(result.contacts);
+    const std::array<FingerPoint, 3> fingers = ExtractFingerPoints(result.contacts);
+    const bool hasThreeFingers = result.contacts.size() >= 3;
+    const Distances distances = hasThreeFingers ? CalculateDistances(fingers) : Distances{};
+    const bool sameHand = hasThreeFingers ? IsSameHand(distances) : !result.contacts.empty();
+    const bool active = result.phase != touchrev::gesture::GesturePhase::End && !result.contacts.empty();
 
-bool ThreeFingerGestureRecognizer::PartiallyMatchesCandidateIds() const
-{
-    if (!hasCandidateIds_ || activeFingers_.empty())
-    {
-        return false;
-    }
-
-    // 至少需要 2 个手指
-    if (activeFingers_.size() < 2)
-    {
-        return false;
-    }
-
-    // 所有当前活动的手指 ID 都必须在原始候选 ID 集合中
-    for (const auto& finger : activeFingers_)
-    {
-        if (std::find(candidateIds_.begin(), candidateIds_.end(), finger.id) == candidateIds_.end())
-        {
-            return false;  // 发现不属于原始 ID 的新手指
-        }
-    }
-
-    return true;
-}
-
-ThreeFingerGestureRecognizer::Point ThreeFingerGestureRecognizer::CalculateCenterFromActive() const
-{
-    if (activeFingers_.empty())
-    {
-        return {};
-    }
-
-    double sumX = 0.0;
-    double sumY = 0.0;
-    for (const auto& finger : activeFingers_)
-    {
-        sumX += finger.point.x;
-        sumY += finger.point.y;
-    }
-
-    return {sumX / static_cast<double>(activeFingers_.size()),
-            sumY / static_cast<double>(activeFingers_.size())};
-}
-
-void ThreeFingerGestureRecognizer::StoreCandidateIds(const std::array<FingerPoint, 3>& fingers)
-{
-    candidateIds_ = {fingers[0].id, fingers[1].id, fingers[2].id};
-    candidateStartFingers_ = fingers;
-    hasCandidateIds_ = true;
+    return MakeResult(
+        type,
+        active,
+        sameHand,
+        ToPublicPoint(result.center),
+        ToPublicPoint(result.delta),
+        distances,
+        fingers);
 }
 
 ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::MakeResult(
@@ -527,47 +408,63 @@ ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::MakeResult(
         .delta = delta,
         .distances = distances,
         .activeIds = activeIds,
-        .startIds = candidateIds_,
-        .deltaValid = hasCandidateIds_,
+        .startIds = sessionStartIds_,
+        .deltaValid = hasSessionStartIds_,
         .rawCenterX = lastRawCenterX_,
         .rawCenterY = lastRawCenterY_,
         .hasRawCenter = hasLastRawCenter_,
     };
 }
 
-ThreeFingerGestureRecognizer::Result ThreeFingerGestureRecognizer::FinishCandidateTap(
-    Point center,
-    Distances distances,
-    const std::array<FingerPoint, 3>& fingers)
+ThreeFingerGestureRecognizer::Point ThreeFingerGestureRecognizer::ToPublicPoint(touchrev::gesture::Point point)
 {
-    const std::int64_t now = CounterNow();
-    const double durationMs = CounterMs(now - candidateStartQpc_);
-    const double moveDistance = Distance(candidateStartCenter_, center);
+    return {point.x, point.y};
+}
 
-    if (durationMs > kTapMaxDurationMs || moveDistance > kTapMoveThreshold)
+std::array<ThreeFingerGestureRecognizer::FingerPoint, 3> ThreeFingerGestureRecognizer::ExtractFingerPoints(
+    const std::vector<touchrev::gesture::GestureContact>& contacts)
+{
+    std::vector<touchrev::gesture::GestureContact> sorted = contacts;
+    std::sort(sorted.begin(), sorted.end(), [](const auto& a, const auto& b) {
+        return a.contactId < b.contactId;
+    });
+
+    std::array<FingerPoint, 3> fingers{};
+    for (size_t i = 0; i < std::min(sorted.size(), fingers.size()); ++i)
     {
-        return MakeResult(EventType::None, false, true, center, {}, distances, fingers);
+        fingers[i] = {
+            .id = sorted[i].contactId,
+            .point = {sorted[i].current.x, sorted[i].current.y},
+            .rawX = sorted[i].rawX,
+            .rawY = sorted[i].rawY,
+        };
+    }
+    return fingers;
+}
+
+void ThreeFingerGestureRecognizer::CaptureSessionStartIds(const std::vector<touchrev::gesture::GestureContact>& contacts)
+{
+    const std::array<FingerPoint, 3> fingers = ExtractFingerPoints(contacts);
+    sessionStartIds_ = {fingers[0].id, fingers[1].id, fingers[2].id};
+    hasSessionStartIds_ = contacts.size() >= 3;
+}
+
+void ThreeFingerGestureRecognizer::UpdateRawCenterCache(const std::vector<touchrev::gesture::GestureContact>& contacts)
+{
+    if (contacts.empty())
+    {
+        return;
     }
 
-    if (hasFirstTap_)
+    LONG sumX = 0;
+    LONG sumY = 0;
+    for (const touchrev::gesture::GestureContact& contact : contacts)
     {
-        const double elapsedMs = CounterMs(now - firstTapQpc_);
-        if (elapsedMs < kMinDoubleTapIntervalMs)
-        {
-            // 时间间隔过短，视为硬件抖动噪声，直接忽略，不触发双击且不重置第一击状态
-            return MakeResult(EventType::None, false, true, center, {}, distances, fingers);
-        }
-
-        if (elapsedMs <= kDoubleTapIntervalMs &&
-            Distance(firstTapCenter_, center) <= kDoubleTapDistance)
-        {
-            hasFirstTap_ = false;
-            return MakeResult(EventType::DoubleTap, false, true, center, {}, distances, fingers);
-        }
+        sumX += contact.rawX;
+        sumY += contact.rawY;
     }
 
-    hasFirstTap_ = true;
-    firstTapQpc_ = now;
-    firstTapCenter_ = center;
-    return MakeResult(EventType::None, false, true, center, {}, distances, fingers);
+    lastRawCenterX_ = sumX / static_cast<LONG>(contacts.size());
+    lastRawCenterY_ = sumY / static_cast<LONG>(contacts.size());
+    hasLastRawCenter_ = true;
 }

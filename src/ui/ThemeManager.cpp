@@ -129,7 +129,7 @@ void ThemeManager::ApplyWindowBackdrop(HWND hwnd) const
         DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_BORDER_COLOR)", hr);
     }
 
-    int backdrop = 0; // DWMSBT_AUTO
+    int backdrop = 1; // DWMSBT_NONE
     hr = DwmSetWindowAttribute(
         hwnd,
         kDwmwaSystemBackdropType,

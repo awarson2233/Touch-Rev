@@ -1,9 +1,13 @@
 #pragma once
 
+#include "input/gesture/GestureContact.h"
+#include "input/gesture/GestureRecognizers.h"
+#include "input/gesture/GestureSession.h"
 #include "input/raw/RawTouchInput.h"
 
 #include <array>
-#include <cstdint>
+#include <memory>
+#include <optional>
 #include <vector>
 
 class ThreeFingerGestureRecognizer
@@ -57,56 +61,54 @@ public:
     void Reset();
 
 private:
-    enum class State
-    {
-        Idle,
-        Candidate,
-        Tracking,
-        LongPressActive,
-    };
-
     struct FingerPoint
     {
         DWORD id = 0;
         Point point{};
+        LONG rawX = 0;
+        LONG rawY = 0;
     };
 
-    static std::int64_t CounterNow();
-    static double CounterMs(std::int64_t delta);
     static double Distance(Point a, Point b);
-    static Point Center(const std::array<FingerPoint, 3>& fingers);
     static Distances CalculateDistances(const std::array<FingerPoint, 3>& fingers);
     static bool IsSameHand(const Distances& distances);
-    static bool TryAverageDeltaById(const std::array<FingerPoint, 3>& start, const std::array<FingerPoint, 3>& current, Point& delta);
 
-    void UpdateActiveSnapshot(const RawTouchInput::Frame& frame);
-    bool TryExtractThreeFingers(std::array<FingerPoint, 3>& fingers) const;
-    bool MatchesCandidateIds(const std::array<FingerPoint, 3>& fingers) const;
-    bool PartiallyMatchesCandidateIds() const;
-    Point CalculateCenterFromActive() const;
-    void StoreCandidateIds(const std::array<FingerPoint, 3>& fingers);
-    Result MakeResult(EventType type, bool active, bool sameHand, Point center, Point delta, Distances distances, const std::array<FingerPoint, 3>& fingers);
-    Result FinishCandidateTap(Point center, Distances distances, const std::array<FingerPoint, 3>& fingers);
+    std::optional<touchrev::gesture::GestureRecognitionResult> ProcessContactEvent(const touchrev::gesture::GestureContactEvent& event);
+    std::optional<touchrev::gesture::GestureRecognitionResult> HandlePendingPhase();
+    std::optional<touchrev::gesture::GestureRecognitionResult> HandleActivePhase();
+    std::optional<touchrev::gesture::GestureRecognitionResult> FinalizeSession(touchrev::gesture::GestureEndReason reason);
+    void BeginRecognizers();
+    void ResetRecognizersForSession();
+    int MinimumFingerQuorum() const;
 
-    State state_ = State::Idle;
-    std::vector<FingerPoint> activeFingers_;
-    std::array<DWORD, 3> candidateIds_{};
-    std::array<FingerPoint, 3> candidateStartFingers_{};
-    bool hasCandidateIds_ = false;
-    std::int64_t candidateStartQpc_ = 0;
-    Point candidateStartCenter_{};
+    Result ConvertResult(const touchrev::gesture::GestureRecognitionResult& result);
+    Result MakeResult(
+        EventType type,
+        bool active,
+        bool sameHand,
+        Point center,
+        Point delta,
+        Distances distances,
+        const std::array<FingerPoint, 3>& fingers);
+    static Point ToPublicPoint(touchrev::gesture::Point point);
+    static std::array<FingerPoint, 3> ExtractFingerPoints(const std::vector<touchrev::gesture::GestureContact>& contacts);
+    void CaptureSessionStartIds(const std::vector<touchrev::gesture::GestureContact>& contacts);
+    void UpdateRawCenterCache(const std::vector<touchrev::gesture::GestureContact>& contacts);
+
+    touchrev::gesture::GestureContactTracker contactTracker_;
+    std::unique_ptr<touchrev::gesture::GestureSession> session_;
+    touchrev::gesture::ThreeFingerLongPressRecognizer longPressRecognizer_;
+    touchrev::gesture::MultiFingerTapRecognizer tapRecognizer_{3};
+    bool recognizersBegun_ = false;
+    std::array<DWORD, 3> sessionStartIds_{};
+    bool hasSessionStartIds_ = false;
+
     Point lastCenter_{};
     Point lastDelta_{};
     Distances lastDistances_{};
-    std::array<FingerPoint, 3> lastFingers_{};
     bool lastThreeFingerActive_ = false;
     bool lastSameHand_ = false;
-    // 缓存最后有效的原始触摸坐标（用于 Tick 触发时计算触摸中心）
     LONG lastRawCenterX_ = 0;
     LONG lastRawCenterY_ = 0;
     bool hasLastRawCenter_ = false;
-
-    bool hasFirstTap_ = false;
-    std::int64_t firstTapQpc_ = 0;
-    Point firstTapCenter_{};
 };

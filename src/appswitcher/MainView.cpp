@@ -377,50 +377,143 @@ void MainView::UpdateContainerAcrylicBrush()
         return;
     }
 
+    auto appResources = winrt::Windows::UI::Xaml::Application::Current().Resources();
+    auto GetThemeDict = [&](bool dark) -> winrt::Windows::UI::Xaml::ResourceDictionary
+    {
+        auto themeKey = winrt::box_value(dark ? L"Dark" : L"Light");
+        try
+        {
+            auto themeDictionaries = appResources.ThemeDictionaries();
+            if (themeDictionaries.HasKey(themeKey))
+            {
+                return themeDictionaries.Lookup(themeKey).as<winrt::Windows::UI::Xaml::ResourceDictionary>();
+            }
+        }
+        catch (...) {}
+
+        try
+        {
+            auto merged = appResources.MergedDictionaries();
+            for (uint32_t i = 0; i < merged.Size(); ++i)
+            {
+                auto subDict = merged.GetAt(i);
+                auto themeDictionaries = subDict.ThemeDictionaries();
+                if (themeDictionaries.HasKey(themeKey))
+                {
+                    return themeDictionaries.Lookup(themeKey).as<winrt::Windows::UI::Xaml::ResourceDictionary>();
+                }
+            }
+        }
+        catch (...) {}
+        return nullptr;
+    };
+
     try
     {
         double blurAmount = 80.0;
         double noiseOpacity = 0.02;
         double tintOpacity = isWindowActive_ ? 0.25 : 0.55;
+        double luminosityOpacity = 0.8;
+        double saturation = 1.25;
         winrt::Windows::UI::Color tintColor = {0xFF, 0x20, 0x20, 0x20};
+        winrt::Windows::UI::Color luminosityColor = {0xFF, 0x20, 0x20, 0x20};
+
+        bool isDark = (palette_.primaryText.R > 0x80);
+        winrt::Windows::UI::Xaml::ResourceDictionary themeDict = GetThemeDict(isDark);
+
+        auto GetThemeResource = [&](const wchar_t* key) -> winrt::Windows::Foundation::IInspectable
+        {
+            if (themeDict)
+            {
+                auto boxedKey = winrt::box_value(key);
+                if (themeDict.HasKey(boxedKey))
+                {
+                    return themeDict.Lookup(boxedKey);
+                }
+            }
+            return nullptr;
+        };
 
         if (appSwitcherContainer_)
         {
-            auto res = appSwitcherContainer_.Resources();
-            if (res.HasKey(winrt::box_value(L"AcrylicBlurAmount")))
+            if (auto val = GetThemeResource(L"AcrylicBlurAmount"))
             {
-                blurAmount = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"AcrylicBlurAmount")));
+                blurAmount = winrt::unbox_value<double>(val);
             }
-            if (res.HasKey(winrt::box_value(L"AcrylicNoiseOpacity")))
+            if (auto val = GetThemeResource(L"AcrylicNoiseOpacity"))
             {
-                noiseOpacity = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"AcrylicNoiseOpacity")));
+                noiseOpacity = winrt::unbox_value<double>(val);
             }
             
             const auto opacityKey = isWindowActive_ ? L"AcrylicTintOpacity" : L"AcrylicInactiveTintOpacity";
-            if (res.HasKey(winrt::box_value(opacityKey)))
+            if (auto val = GetThemeResource(opacityKey))
             {
-                tintOpacity = winrt::unbox_value<double>(res.Lookup(winrt::box_value(opacityKey)));
+                tintOpacity = winrt::unbox_value<double>(val);
             }
             
-            if (res.HasKey(winrt::box_value(L"AcrylicTintColor")))
+            if (auto val = GetThemeResource(L"AcrylicTintColor"))
             {
-                tintColor = winrt::unbox_value<winrt::Windows::UI::Color>(res.Lookup(winrt::box_value(L"AcrylicTintColor")));
+                tintColor = winrt::unbox_value<winrt::Windows::UI::Color>(val);
+                luminosityColor = tintColor;
+            }
+
+            if (auto val = GetThemeResource(L"AcrylicLuminosityColor"))
+            {
+                luminosityColor = winrt::unbox_value<winrt::Windows::UI::Color>(val);
+            }
+
+            if (auto val = GetThemeResource(L"AcrylicLuminosityOpacity"))
+            {
+                luminosityOpacity = winrt::unbox_value<double>(val);
+            }
+
+            if (auto val = GetThemeResource(L"AcrylicSaturation"))
+            {
+                saturation = winrt::unbox_value<double>(val);
             }
         }
 
         auto compositor = containerAcrylicVisual_.Compositor();
         win32acrylic::AcrylicBrushOptions options{};
-        options.material = win32acrylic::AcrylicMaterial::Acrylic;
+        options.material = win32acrylic::AcrylicMaterial::LegacyAcrylic;
         options.backdropSource = win32acrylic::BackdropSource::HostBackdrop;
         options.tintColor = ToAcrylicColor(tintColor, tintOpacity);
-        options.luminosityColor = ToAcrylicColor(tintColor, 0.8);
+        options.luminosityColor = ToAcrylicColor(luminosityColor, luminosityOpacity);
         options.blurAmount = static_cast<float>(blurAmount);
+        options.legacyBlurAmount = static_cast<float>(blurAmount);
         options.noiseOpacity = static_cast<float>(noiseOpacity);
+        options.saturation = static_cast<float>(saturation);
         containerAcrylicVisual_.Brush(win32acrylic::CreateAcrylicBrush(compositor, options));
+
+        if (appSwitcherContainer_)
+        {
+            winrt::Windows::UI::Xaml::Media::SolidColorBrush transparentBrush{winrt::Windows::UI::Color{0, 0, 0, 0}};
+            appSwitcherContainer_.Background(transparentBrush);
+        }
     }
     catch (const winrt::hresult_error& error)
     {
         DebugLogHResult(L"Create AppSwitcherContainer acrylic brush", error.code());
+
+        if (appSwitcherContainer_)
+        {
+            winrt::Windows::UI::Color fallbackColor = {0xFF, 0x20, 0x20, 0x20};
+            
+            bool isDark = (palette_.primaryText.R > 0x80);
+            winrt::Windows::UI::Xaml::ResourceDictionary themeDict = GetThemeDict(isDark);
+
+            if (themeDict)
+            {
+                auto boxedKey = winrt::box_value(L"AcrylicFallbackColor");
+                if (themeDict.HasKey(boxedKey))
+                {
+                    fallbackColor = winrt::unbox_value<winrt::Windows::UI::Color>(themeDict.Lookup(boxedKey));
+                }
+            }
+
+            winrt::Windows::UI::Xaml::Media::SolidColorBrush fallbackBrush{fallbackColor};
+            appSwitcherContainer_.Background(fallbackBrush);
+        }
     }
 }
 

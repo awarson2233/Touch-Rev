@@ -5,14 +5,17 @@
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Dark">
             <!-- 亚克力及窗口全局 -->
-            <Color x:Key="AcrylicTintColor">#FF202020</Color>
-            <x:Double x:Key="AcrylicBlurAmount">80</x:Double>
+            <Color x:Key="AcrylicTintColor">#FFFFFFFF</Color>
+            <Color x:Key="AcrylicLuminosityColor">#FFFFFFFF</Color>
+            <Color x:Key="AcrylicFallbackColor">#FF2C2C2C</Color>
+            <x:Double x:Key="AcrylicBlurAmount">30</x:Double>
             <x:Double x:Key="AcrylicNoiseOpacity">0.02</x:Double>
-            <x:Double x:Key="AcrylicTintOpacity">0.25</x:Double>
-            <x:Double x:Key="AcrylicInactiveTintOpacity">0.55</x:Double>
+            <x:Double x:Key="AcrylicTintOpacity">0.15</x:Double>
+            <x:Double x:Key="AcrylicInactiveTintOpacity">0.00</x:Double>
+            <x:Double x:Key="AcrylicLuminosityOpacity">0.12</x:Double>
+            <x:Double x:Key="AcrylicSaturation">1.40</x:Double>
             
             <SolidColorBrush x:Key="RootBackdropBrush" Color="#00000000" />
-            <SolidColorBrush x:Key="ContainerBackgroundBrush" Color="#CC181818" />
             <SolidColorBrush x:Key="ContainerBorderBrush" Color="#55FFFFFF" />
             
             <!-- 卡片配色 -->
@@ -46,13 +49,16 @@
         <ResourceDictionary x:Key="Light">
             <!-- 亚克力及窗口全局 -->
             <Color x:Key="AcrylicTintColor">#FFFFFFFF</Color>
-            <x:Double x:Key="AcrylicBlurAmount">80</x:Double>
+            <Color x:Key="AcrylicLuminosityColor">#FFFFFFFF</Color>
+            <Color x:Key="AcrylicFallbackColor">#FFF3F3F3</Color>
+            <x:Double x:Key="AcrylicBlurAmount">30</x:Double>
             <x:Double x:Key="AcrylicNoiseOpacity">0.02</x:Double>
             <x:Double x:Key="AcrylicTintOpacity">0.30</x:Double>
-            <x:Double x:Key="AcrylicInactiveTintOpacity">0.60</x:Double>
+            <x:Double x:Key="AcrylicInactiveTintOpacity">0.90</x:Double>
+            <x:Double x:Key="AcrylicLuminosityOpacity">0.10</x:Double>
+            <x:Double x:Key="AcrylicSaturation">1.70</x:Double>
             
             <SolidColorBrush x:Key="RootBackdropBrush" Color="#00000000" />
-            <SolidColorBrush x:Key="ContainerBackgroundBrush" Color="#E8F3F3F3" />
             <SolidColorBrush x:Key="ContainerBorderBrush" Color="#33000000" />
             
             <!-- 卡片配色 -->

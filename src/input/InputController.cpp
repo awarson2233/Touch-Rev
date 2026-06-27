@@ -329,10 +329,16 @@ InputController::RawInputResult InputController::MapGestureEvent(
 
     if (gestureResult.type == EventType::DoubleTap)
     {
-        // 双击时也计算触摸中心，用于显示器定位
+        // 双击通常在 release-all frame 触发，优先使用识别器保留的最后有效触摸中心。
         POINT touchCenter{};
         bool hasTouchCenter = false;
-        if (frame && frame->contactCount > 0)
+        if (gestureResult.hasRawCenter)
+        {
+            touchCenter.x = gestureResult.rawCenterX;
+            touchCenter.y = gestureResult.rawCenterY;
+            hasTouchCenter = true;
+        }
+        else if (frame && frame->contactCount > 0)
         {
             LONG sumX = 0;
             LONG sumY = 0;

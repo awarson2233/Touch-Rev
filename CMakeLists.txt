@@ -46,6 +46,15 @@ add_executable(TouchRevGUI WIN32
     src/input/InputController.h
     src/input/raw/RawTouchInput.cpp
     src/input/raw/RawTouchInput.h
+    src/input/gesture/GestureContact.cpp
+    src/input/gesture/GestureContact.h
+    src/input/gesture/GestureContext.cpp
+    src/input/gesture/GestureContext.h
+    src/input/gesture/GestureRecognizers.cpp
+    src/input/gesture/GestureRecognizers.h
+    src/input/gesture/GestureSession.cpp
+    src/input/gesture/GestureSession.h
+    src/input/gesture/GestureTypes.h
     src/input/gesture/ThreeFingerGestureRecognizer.cpp
     src/input/gesture/ThreeFingerGestureRecognizer.h
     src/common/Win32Error.cpp
@@ -111,6 +120,15 @@ if(TOUCHREV_BUILD_TOOLS)
         src/tools/RawTouchInputViewer.cpp
         src/input/raw/RawTouchInput.cpp
         src/input/raw/RawTouchInput.h
+        src/input/gesture/GestureContact.cpp
+        src/input/gesture/GestureContact.h
+        src/input/gesture/GestureContext.cpp
+        src/input/gesture/GestureContext.h
+        src/input/gesture/GestureRecognizers.cpp
+        src/input/gesture/GestureRecognizers.h
+        src/input/gesture/GestureSession.cpp
+        src/input/gesture/GestureSession.h
+        src/input/gesture/GestureTypes.h
         src/input/gesture/ThreeFingerGestureRecognizer.cpp
         src/input/gesture/ThreeFingerGestureRecognizer.h
         src/common/Win32Error.cpp
