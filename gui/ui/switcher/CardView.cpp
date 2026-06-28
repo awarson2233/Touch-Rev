@@ -57,7 +57,6 @@ bool ShouldRecreateThumbnail(
 namespace touchrev::appswitcher
 {
 std::unique_ptr<CardView> CardView::Create(
-    const AppSwitcherPalette& palette,
     size_t index,
     CardCallbacks callbacks)
 {
@@ -68,23 +67,10 @@ std::unique_ptr<CardView> CardView::Create(
         auto object = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{xaml});
         auto rootElement = object.as<winrt::Windows::UI::Xaml::FrameworkElement>();
 
-        try
-        {
-            constexpr wchar_t kThemeXamlPath[] = L"xaml/ThemeResources.xaml";
-            const std::wstring themeXaml = touchrev::common::LoadTextFileUtf8(touchrev::common::ModuleRelativePath(kThemeXamlPath));
-            if (!themeXaml.empty())
-            {
-                auto themeRes = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{themeXaml}).as<winrt::Windows::UI::Xaml::ResourceDictionary>();
-                rootElement.Resources().MergedDictionaries().Append(themeRes);
-            }
-        }
-        catch (const winrt::hresult_error& error)
-        {
-            DebugLogHResult(L"Load ThemeResources.xaml in CardView", error.code());
-        }
+
 
         auto item = std::make_unique<CardView>();
-        if (item->Initialize(rootElement, palette, index, callbacks))
+        if (item->Initialize(rootElement, index, callbacks))
         {
             return item;
         }
@@ -97,7 +83,6 @@ std::unique_ptr<CardView> CardView::Create(
 
 bool CardView::Initialize(
     winrt::Windows::UI::Xaml::FrameworkElement rootElement,
-    const AppSwitcherPalette& palette,
     size_t index,
     CardCallbacks callbacks)
 {
@@ -121,8 +106,7 @@ bool CardView::Initialize(
         pressOverlay = root.FindName(L"PressOverlay").as<winrt::Windows::UI::Xaml::Controls::Border>();
 
         ApplyRowWeights();
-        ApplyTheme(palette);
-        palette_ = palette;
+        ApplyTheme(true);
 
         root.PointerEntered([this](auto const&, auto const&) {
             hovered = true;
@@ -217,15 +201,13 @@ void CardView::ApplyRowWeights()
     }
 }
 
-void CardView::ApplyTheme(const AppSwitcherPalette& palette, bool /*active*/)
+void CardView::ApplyTheme(bool /*active*/)
 {
-    palette_ = palette;
-    ApplyInteractionState(palette);
+    ApplyInteractionState();
 }
 
-void CardView::ApplyInteractionState(const AppSwitcherPalette& palette)
+void CardView::ApplyInteractionState()
 {
-    palette_ = palette;
     UpdateVisualState();
 }
 
@@ -237,7 +219,7 @@ void CardView::UpdateVisualState()
         if (root)
         {
             auto res = root.Resources();
-            const auto key = hovered ? L"TitleHoverBackgroundBrush" : L"TitleBackgroundBrush";
+            const auto key = hovered ? L"ControlAltFillColorTertiaryBrush" : L"ControlAltFillColorSecondaryBrush";
             if (res.HasKey(winrt::box_value(key)))
             {
                 titleBrush = res.Lookup(winrt::box_value(key)).as<winrt::Windows::UI::Xaml::Media::Brush>();
@@ -257,7 +239,7 @@ void CardView::UpdateVisualState()
             if (root)
             {
                 auto res = root.Resources();
-                const auto key = grabbed ? L"CardGrabbedOverlayBrush" : L"CardPressedOverlayBrush";
+                const auto key = grabbed ? L"ControlFillColorDefaultBrush" : L"ControlFillColorSecondaryBrush";
                 if (res.HasKey(winrt::box_value(key)))
                 {
                     overlayBrush = res.Lookup(winrt::box_value(key)).as<winrt::Windows::UI::Xaml::Media::Brush>();
@@ -299,9 +281,8 @@ void CardView::ClearThumbnail()
     thumbnailFailed = false;
 }
 
-void CardView::Reset(const AppSwitcherPalette& palette)
+void CardView::Reset()
 {
-    palette_ = palette;
     ClearThumbnail();
     hwnd = nullptr;
     layoutPosition = {};

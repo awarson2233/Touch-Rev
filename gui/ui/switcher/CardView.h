@@ -2,7 +2,7 @@
 
 #include "common/CoordinateSpace.h"
 #include "thumbnail/PrivateThumbnailManager.h"
-#include "ui/ThemeManager.h"
+#include "ui/shared/ThemeManager.h"
 
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
@@ -51,10 +51,7 @@ public:
     bool pressed = false;
     bool grabbed = false;
     bool closeButtonHovered = false;
-    AppSwitcherPalette palette_{};
-
     static std::unique_ptr<CardView> Create(
-        const AppSwitcherPalette& palette,
         size_t index,
         CardCallbacks callbacks);
 
@@ -72,15 +69,14 @@ public:
 
     bool Initialize(
         winrt::Windows::UI::Xaml::FrameworkElement rootElement,
-        const AppSwitcherPalette& palette,
         size_t index,
         CardCallbacks callbacks);
 
     void ApplyRowWeights();
-    void ApplyTheme(const AppSwitcherPalette& palette, bool active = true);
-    void ApplyInteractionState(const AppSwitcherPalette& palette);
+    void ApplyTheme(bool active = true);
+    void ApplyInteractionState();
     void ClearThumbnail();
-    void Reset(const AppSwitcherPalette& palette);
+    void Reset();
     void SetRootVisibility(bool isVisible);
     void AssignWindow(HWND newHwnd);
     void ApplyTitle(const std::wstring& titleText, size_t fallbackOrdinal);

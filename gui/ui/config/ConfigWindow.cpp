@@ -1,8 +1,15 @@
-#include "ui/ConfigWindow.h"
+#include "ui/config/ConfigWindow.h"
 
 #include "common/AppSettings.h"
 #include "common/FileUtils.h"
 #include "common/PathUtils.h"
+
+#include <dwmapi.h>
+#include <windowsx.h>
+#include <commctrl.h>
+#pragma comment(lib, "comctl32.lib")
+
+#pragma comment(lib, "dwmapi.lib")
 
 #if defined(TOUCHREV_BUILD_BLOCKER)
 #include "injector/inject.h"
@@ -12,16 +19,41 @@
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.UI.Xaml.h>
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Windows.UI.Input.h>
+#include <winrt/Windows.UI.Xaml.Input.h>
 
 #include <tlhelp32.h>
 
 namespace
 {
 constexpr wchar_t kWindowTitle[] = L"Touch-Rev 配置";
+
+bool AppendThemeResources(winrt::Windows::UI::Xaml::ResourceDictionary const& resources)
+{
+    try
+    {
+        const std::wstring themeXaml = touchrev::common::LoadTextFileUtf8(
+            touchrev::common::ModuleRelativePath(L"xaml/ThemeResources.xaml"));
+        if (themeXaml.empty())
+        {
+            return false;
+        }
+
+        auto themeRes = winrt::Windows::UI::Xaml::Markup::XamlReader::Load(winrt::hstring{themeXaml})
+                            .as<winrt::Windows::UI::Xaml::ResourceDictionary>();
+        resources.MergedDictionaries().Append(themeRes);
+        return true;
+    }
+    catch (const winrt::hresult_error&)
+    {
+        return false;
+    }
+}
 }
 
 bool ConfigWindow::Initialize(HINSTANCE instance, int showCommand)
@@ -50,8 +82,8 @@ bool ConfigWindow::Initialize(HINSTANCE instance, int showCommand)
     const int clientWidth = MulDiv(560, dpi, 96);
     const int clientHeight = MulDiv(680, dpi, 96);
 
-    // 使用非大小调整的重叠窗口
-    constexpr DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME;
+    // 使用标准的 Win32 窗口样式，但禁用最大化按钮（我们限死了窗口大小）
+    constexpr DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX;
 
     RECT rect = { 0, 0, clientWidth, clientHeight };
     AdjustWindowRectExForDpi(&rect, style, FALSE, 0, dpi);
@@ -82,7 +114,8 @@ bool ConfigWindow::Initialize(HINSTANCE instance, int showCommand)
         return false;
     }
 
-    themeManager_.Initialize(hwnd_);
+    themeManager_.Initialize(hwnd_, true);
+    UpdateXamlTheme();
 
     ShowWindow(hwnd_, showCommand);
     UpdateWindow(hwnd_);
@@ -126,10 +159,43 @@ LRESULT CALLBACK ConfigWindow::WindowProc(HWND hwnd, UINT message, WPARAM wParam
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
+
+
 LRESULT ConfigWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
+
+
     switch (message)
     {
+    case WM_SETTINGCHANGE:
+        if (lParam && wcscmp(reinterpret_cast<LPCWSTR>(lParam), L"Registry") == 0)
+        {
+            if (themeManager_.Refresh(hwnd_))
+            {
+                UpdateXamlTheme();
+            }
+        }
+        return 0;
+
+    case WM_GETMINMAXINFO:
+        {
+            auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
+            const UINT dpi = GetDpiForWindow(hwnd_);
+            const int clientWidth = MulDiv(560, dpi, 96);
+            const int clientHeight = MulDiv(680, dpi, 96);
+
+            RECT rect = { 0, 0, clientWidth, clientHeight };
+            AdjustWindowRectExForDpi(&rect, GetWindowLongW(hwnd_, GWL_STYLE), FALSE, GetWindowLongW(hwnd_, GWL_EXSTYLE), dpi);
+            const int width = rect.right - rect.left;
+            const int height = rect.bottom - rect.top;
+
+            mmi->ptMinTrackSize.x = width;
+            mmi->ptMinTrackSize.y = height;
+            mmi->ptMaxTrackSize.x = width;
+            mmi->ptMaxTrackSize.y = height;
+            return 0;
+        }
+
     case WM_CREATE:
         if (FAILED(OnCreate()))
         {
@@ -176,6 +242,10 @@ LRESULT ConfigWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_TIMER:
         if (wParam == 1)
         {
+            if (themeManager_.Refresh(hwnd_))
+            {
+                UpdateXamlTheme();
+            }
             SyncConfigToUi();
         }
         return 0;
@@ -219,6 +289,37 @@ HRESULT ConfigWindow::OnCreate()
             return hr;
         }
 
+
+
+        // 开启窗口 Mica 材质与沉浸式扩展
+        MARGINS margins = { -1, -1, -1, -1 };
+        ::DwmExtendFrameIntoClientArea(hwnd_, &margins);
+
+        #if defined(DWMWA_SYSTEMBACKDROP_TYPE)
+        constexpr DWORD kDwmwaSystemBackdropType = DWMWA_SYSTEMBACKDROP_TYPE;
+        #else
+        constexpr DWORD kDwmwaSystemBackdropType = 38;
+        #endif
+        DWORD backdropType = 2; // Mica
+        ::DwmSetWindowAttribute(hwnd_, kDwmwaSystemBackdropType, &backdropType, sizeof(backdropType));
+
+        // 隐式实例化全局 Application 对象，以支持所有局部 XAML 在反序列化时的全局主题资源查询
+        try
+        {
+            if (!winrt::Windows::UI::Xaml::Application::Current())
+            {
+                auto app = winrt::Windows::UI::Xaml::Application();
+            }
+            auto currentApp = winrt::Windows::UI::Xaml::Application::Current();
+            if (currentApp)
+            {
+                AppendThemeResources(currentApp.Resources());
+            }
+        }
+        catch (...)
+        {
+        }
+
         // 加载 ConfigRoot.xaml
         const std::wstring xaml = touchrev::common::LoadTextFileUtf8(
             touchrev::common::ModuleRelativePath(L"xaml/ConfigRoot.xaml"));
@@ -229,13 +330,22 @@ HRESULT ConfigWindow::OnCreate()
 
         auto object = XamlReader::Load(winrt::hstring{xaml});
         auto root = object.as<winrt::Windows::UI::Xaml::Controls::Grid>();
-        xamlSource_.Content(root);
+        root_ = root;
+        UpdateXamlTheme();
+        xamlSource_.Content(root_);
+
+        // 检索 XAML 中的配置控件与状态栏
+        hookStatusText_ = root.FindName(L"HookStatusText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
+
+
 
         // 检索 XAML 中的配置控件
         hookToggle_ = root.FindName(L"HookToggle").as<winrt::Windows::UI::Xaml::Controls::ToggleSwitch>();
         gestureToggle_ = root.FindName(L"GestureToggle").as<winrt::Windows::UI::Xaml::Controls::ToggleSwitch>();
         windowToggle_ = root.FindName(L"WindowToggle").as<winrt::Windows::UI::Xaml::Controls::ToggleSwitch>();
         exitButton_ = root.FindName(L"ExitButton").as<winrt::Windows::UI::Xaml::Controls::Button>();
+
+
 
         // 同步当前的配置状态到 UI
         SyncConfigToUi();
@@ -290,6 +400,8 @@ HRESULT ConfigWindow::OnCreate()
             client.bottom - client.top,
             SWP_NOZORDER | SWP_SHOWWINDOW);
 
+
+
         return S_OK;
     }
     catch (const winrt::hresult_error& error)
@@ -303,6 +415,7 @@ void ConfigWindow::OnDestroy()
     KillTimer(hwnd_, 1);
     
     // 清理 XAML 引用
+    hookStatusText_ = nullptr;
     hookToggle_ = nullptr;
     gestureToggle_ = nullptr;
     windowToggle_ = nullptr;
@@ -313,6 +426,7 @@ void ConfigWindow::OnDestroy()
         xamlSource_.Content(nullptr);
         xamlSource_ = nullptr;
     }
+    root_ = nullptr;
     xamlManager_ = nullptr;
     hwnd_ = nullptr;
     xamlHwnd_ = nullptr;
@@ -337,6 +451,68 @@ void ConfigWindow::SyncConfigToUi()
     if (windowToggle_ && windowToggle_.IsOn() != touchrev::settings::g_IsSwitcherWindowEnabled)
     {
         windowToggle_.IsOn(touchrev::settings::g_IsSwitcherWindowEnabled);
+    }
+
+    if (hookStatusText_)
+    {
+        const bool isDark = (themeManager_.Mode() == AppThemeMode::Dark);
+        if (hookLoaded)
+        {
+            DWORD pdbStatus = 0;
+            DWORD hookStatus = 0;
+            HKEY key = nullptr;
+            if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Touch-Rev", 0, KEY_READ, &key) == ERROR_SUCCESS)
+            {
+                DWORD size = sizeof(pdbStatus);
+                RegQueryValueExW(key, L"PdbStatus", nullptr, nullptr, reinterpret_cast<LPBYTE>(&pdbStatus), &size);
+                size = sizeof(hookStatus);
+                RegQueryValueExW(key, L"HookStatus", nullptr, nullptr, reinterpret_cast<LPBYTE>(&hookStatus), &size);
+                RegCloseKey(key);
+            }
+
+            if (pdbStatus == 1)
+            {
+                hookStatusText_.Text(L"运行状态：PDB 符号下载中，正在拦截...");
+                auto yellowColor = isDark ? winrt::Windows::UI::Color{255, 0xFF, 0xC8, 0x3C} : winrt::Windows::UI::Color{255, 0xE0, 0x80, 0x00};
+                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(yellowColor));
+            }
+            else if (pdbStatus == 3)
+            {
+                hookStatusText_.Text(L"运行状态：无法下载 PDB 符号 (网络错误)，拦截已失效！");
+                auto redColor = isDark ? winrt::Windows::UI::Color{255, 0xFF, 0x73, 0x73} : winrt::Windows::UI::Color{255, 0xD3, 0x2F, 0x2F};
+                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(redColor));
+            }
+            else if (pdbStatus == 4)
+            {
+                hookStatusText_.Text(L"运行状态：本地 PDB 缓存已过期/损坏，正在重新下载...");
+                auto yellowColor = isDark ? winrt::Windows::UI::Color{255, 0xFF, 0xC8, 0x3C} : winrt::Windows::UI::Color{255, 0xE0, 0x80, 0x00};
+                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(yellowColor));
+            }
+            else if (hookStatus == 2)
+            {
+                hookStatusText_.Text(L"运行状态：Hook 符号补丁配置失效，拦截已失效！");
+                auto redColor = isDark ? winrt::Windows::UI::Color{255, 0xFF, 0x73, 0x73} : winrt::Windows::UI::Color{255, 0xD3, 0x2F, 0x2F};
+                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(redColor));
+            }
+            else if (hookStatus == 1 || pdbStatus == 2)
+            {
+                hookStatusText_.Text(L"运行状态：已拦截 Windows 默认手势 (运行中)");
+                auto greenColor = isDark ? winrt::Windows::UI::Color{255, 0x4C, 0xE2, 0x8A} : winrt::Windows::UI::Color{255, 0x0F, 0x7B, 0x43};
+                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(greenColor));
+            }
+            else
+            {
+                hookStatusText_.Text(L"运行状态：已注入拦截模块，正在初始化...");
+                auto blueColor = isDark ? winrt::Windows::UI::Color{255, 0x33, 0xAA, 0xFF} : winrt::Windows::UI::Color{255, 0x00, 0x78, 0xD4};
+                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(blueColor));
+            }
+        }
+        else
+        {
+            hookStatusText_.Text(L"运行状态：未拦截 (未注入)");
+            auto grayColor = isDark ? winrt::Windows::UI::Color{255, 0xAA, 0xAA, 0xAA} : winrt::Windows::UI::Color{255, 0x66, 0x66, 0x66};
+            hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(grayColor));
+        }
     }
 
     isTogglingHook_ = false;
@@ -496,4 +672,15 @@ bool ConfigWindow::QueryHookStatus()
     }
     CloseHandle(snapshot);
     return found;
+}
+
+void ConfigWindow::UpdateXamlTheme()
+{
+    if (!root_) return;
+    using namespace winrt::Windows::UI::Xaml;
+
+    const bool isDark = (themeManager_.Mode() == AppThemeMode::Dark);
+
+    // 设置 RequestedTheme，自动从合并的官方字典中刷新整个界面的色彩
+    root_.RequestedTheme(isDark ? ElementTheme::Dark : ElementTheme::Light);
 }

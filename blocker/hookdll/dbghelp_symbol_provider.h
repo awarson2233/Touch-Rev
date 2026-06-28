@@ -18,4 +18,6 @@ bool TryResolveDbgHelpSymbolAddress(const DirectHookSpec& spec,
                                     HMODULE module,
                                     DbgHelpSymbolResolveResult* result);
 
+void ShutdownDbgHelpSession();
+
 }  // namespace touchrev

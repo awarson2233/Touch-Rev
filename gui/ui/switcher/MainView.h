@@ -4,8 +4,8 @@
 #include "LayoutEngine.h"
 #include "common/CoordinateSpace.h"
 #include "thumbnail/PrivateThumbnailManager.h"
-#include "ui/ThemeManager.h"
-#include "ui/ThinXamlAppSwitcherHost.h"
+#include "ui/shared/ThemeManager.h"
+#include "ThinXamlAppSwitcherHost.h"
 
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
@@ -32,7 +32,7 @@ public:
     RECT ContainerBoundsPx() const;
     PointDip DragPosition() const { return dragPosition_; }
     void SetDragPosition(PointDip position);
-    void ApplyTheme(const AppSwitcherPalette& palette, bool active = true);
+    void ApplyTheme(AppThemeMode mode, bool active = true);
     void SetBoundsChangedCallback(std::function<void()> callback);
     void SetMissedInputCallback(std::function<void()> callback);
     void SetItemActivatedCallback(std::function<void(HWND)> callback);
@@ -102,7 +102,7 @@ private:
     std::function<void(HWND, POINT)> itemDragReleasedCallback_;
     std::function<bool(HWND)> itemCloseRequestedCallback_;
     std::vector<HWND> dismissedHwnds_;
-    AppSwitcherPalette palette_{};
+    AppThemeMode themeMode_ = AppThemeMode::Dark;
     winrt::Windows::UI::Composition::SpriteVisual containerAcrylicVisual_{nullptr};
     winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry containerAcrylicClip_{nullptr};
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;

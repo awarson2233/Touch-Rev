@@ -106,7 +106,7 @@ void MainView::Shutdown()
 {
     for (auto& item : cards_)
     {
-        item->Reset(palette_);
+        item->Reset();
     }
     cards_.clear();
     if (appSwitcherContainer_)
@@ -354,9 +354,9 @@ void MainView::AttachPointerHandlers()
     // Item-level pointer handlers are attached when SwitcherItem instances are created.
 }
 
-void MainView::ApplyTheme(const AppSwitcherPalette& palette, bool active)
+void MainView::ApplyTheme(AppThemeMode mode, bool active)
 {
-    palette_ = palette;
+    themeMode_ = mode;
     isWindowActive_ = active;
 
     if (appSwitcherContainer_)
@@ -366,7 +366,7 @@ void MainView::ApplyTheme(const AppSwitcherPalette& palette, bool active)
 
     for (auto& item : cards_)
     {
-        item->ApplyTheme(palette_, active);
+        item->ApplyTheme(active);
     }
 }
 
@@ -418,7 +418,7 @@ void MainView::UpdateContainerAcrylicBrush()
         winrt::Windows::UI::Color tintColor = {0xFF, 0x20, 0x20, 0x20};
         winrt::Windows::UI::Color luminosityColor = {0xFF, 0x20, 0x20, 0x20};
 
-        bool isDark = (palette_.primaryText.R > 0x80);
+        bool isDark = (themeMode_ == AppThemeMode::Dark);
         winrt::Windows::UI::Xaml::ResourceDictionary themeDict = GetThemeDict(isDark);
 
         auto GetThemeResource = [&](const wchar_t* key) -> winrt::Windows::Foundation::IInspectable
@@ -499,7 +499,7 @@ void MainView::UpdateContainerAcrylicBrush()
         {
             winrt::Windows::UI::Color fallbackColor = {0xFF, 0x20, 0x20, 0x20};
             
-            bool isDark = (palette_.primaryText.R > 0x80);
+            bool isDark = (themeMode_ == AppThemeMode::Dark);
             winrt::Windows::UI::Xaml::ResourceDictionary themeDict = GetThemeDict(isDark);
 
             if (themeDict)
@@ -541,7 +541,7 @@ void MainView::ResetInteractionState()
                                      ? winrt::Windows::UI::Xaml::Visibility::Visible
                                      : winrt::Windows::UI::Xaml::Visibility::Collapsed);
         }
-        item->ApplyInteractionState(palette_);
+        item->ApplyInteractionState();
     }
 }
 
@@ -573,7 +573,7 @@ void MainView::BeginGrab(size_t itemIndex)
                                      ? winrt::Windows::UI::Xaml::Visibility::Visible
                                      : winrt::Windows::UI::Xaml::Visibility::Collapsed);
         }
-        item->ApplyInteractionState(palette_);
+        item->ApplyInteractionState();
     }
 }
 
@@ -743,7 +743,7 @@ bool MainView::LoadRoot()
         });
 
         host_->SetRoot(root_);
-        ApplyTheme(palette_, isWindowActive_);
+        ApplyTheme(themeMode_, isWindowActive_);
         AttachPointerHandlers();
         return true;
     }
@@ -784,7 +784,7 @@ std::unique_ptr<CardView> MainView::CreateItem()
         args.Handled(true);
     };
 
-    auto item = CardView::Create(palette_, itemIndex, callbacks);
+    auto item = CardView::Create(itemIndex, callbacks);
     if (!item)
     {
         return nullptr;
@@ -817,7 +817,7 @@ void MainView::ProcessItemPressed(size_t index, winrt::Windows::UI::Xaml::Input:
     xamlDragOffsetY_ = logicalPoint.y - cards_[index]->layoutPosition.y;
     cards_[index]->pressed = true;
     cards_[index]->hovered = false;
-    cards_[index]->ApplyInteractionState(palette_);
+    cards_[index]->ApplyInteractionState();
     cards_[index]->root.CapturePointer(args.Pointer());
     args.Handled(true);
 }
@@ -1080,7 +1080,7 @@ void MainView::ApplyLayout(
         item.SetRootVisibility(visible);
         if (!visible)
         {
-            item.Reset(palette_);
+            item.Reset();
             continue;
         }
 

@@ -4,7 +4,7 @@
 
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Dark">
-            <!-- 亚克力及窗口全局 -->
+            <!-- 亚克力及窗口全局（严格保持 key 值和值不变） -->
             <Color x:Key="AcrylicTintColor">#FFFFFFFF</Color>
             <Color x:Key="AcrylicLuminosityColor">#FFFFFFFF</Color>
             <Color x:Key="AcrylicFallbackColor">#FF2C2C2C</Color>
@@ -14,40 +14,46 @@
             <x:Double x:Key="AcrylicInactiveTintOpacity">0.00</x:Double>
             <x:Double x:Key="AcrylicLuminosityOpacity">0.12</x:Double>
             <x:Double x:Key="AcrylicSaturation">1.40</x:Double>
-            
-            <SolidColorBrush x:Key="RootBackdropBrush" Color="#00000000" />
-            <SolidColorBrush x:Key="ContainerBorderBrush" Color="#55FFFFFF" />
-            
-            <!-- 卡片配色 -->
-            <SolidColorBrush x:Key="CardBackgroundBrush" Color="#EE242424" />
-            <SolidColorBrush x:Key="TitleBackgroundBrush" Color="#FF272727" />
-            <SolidColorBrush x:Key="TitleHoverBackgroundBrush" Color="#FF323232" />
-            <SolidColorBrush x:Key="TitlePressedBackgroundBrush" Color="#FF222222" />
-            <SolidColorBrush x:Key="TitleGrabbedBackgroundBrush" Color="#FF1F1F1F" />
-            <SolidColorBrush x:Key="ContentBackgroundBrush" Color="#FF101010" />
-            
-            <!-- 文字和按钮 -->
-            <SolidColorBrush x:Key="PrimaryTextBrush" Color="#FFFFFFFF" />
-            <SolidColorBrush x:Key="SecondaryTextBrush" Color="#CCFFFFFF" />
-            <SolidColorBrush x:Key="IconTextBrush" Color="#CCFFFFFF" />
+
+            <!-- 官方标准 UI 主题色彩键值（Dark） -->
+            <SolidColorBrush x:Key="SolidBackgroundFillColorBaseBrush" Color="#FF101010" />
+            <SolidColorBrush x:Key="CardBackgroundFillColorDefaultBrush" Color="#EE242424" />
+            <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#55FFFFFF" />
+            <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="#12FFFFFF" />
+
+            <SolidColorBrush x:Key="ControlAltFillColorSecondaryBrush" Color="#0DFFFFFF" />
+            <SolidColorBrush x:Key="ControlAltFillColorTertiaryBrush" Color="#0BFFFFFF" />
+            <SolidColorBrush x:Key="ControlAltFillColorQuarternaryBrush" Color="#12FFFFFF" />
+            <SolidColorBrush x:Key="ControlAltFillColorDisabledBrush" Color="#09FFFFFF" />
+
+            <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#FFFFFF" />
+            <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#C5FFFFFF" />
+            <SolidColorBrush x:Key="TextFillColorTertiaryBrush" Color="#87FFFFFF" />
+
+            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#FF0078D4" />
+            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#FF0078D4" Opacity="0.13" />
+            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#000000" />
+
+            <Color x:Key="ControlFillColorTransparent">#00FFFFFF</Color>
+            <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="#0FFFFFFF" />
+            <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#15FFFFFF" />
+            <SolidColorBrush x:Key="ControlFillColorTransparentBrush" Color="{ThemeResource ControlFillColorTransparent}" />
+
+            <!-- 切换窗口专用的关闭按钮辅助键 -->
             <Color x:Key="ButtonTextColor">#FFFFFFFF</Color>
             <Color x:Key="CloseButtonHoverBackgroundColor">#FFC42B1C</Color>
+            <Color x:Key="CloseButtonPressedBackgroundColor">#FFF1707A</Color>
             <Color x:Key="CloseButtonHoverTextColor">#FFFFFFFF</Color>
+            <Color x:Key="ThumbnailPlaceholderTextColor">#66FFFFFF</Color>
             <SolidColorBrush x:Key="ButtonTextBrush" Color="{ThemeResource ButtonTextColor}" />
             <SolidColorBrush x:Key="CloseButtonHoverBackgroundBrush" Color="{ThemeResource CloseButtonHoverBackgroundColor}" />
+            <SolidColorBrush x:Key="CloseButtonPressedBackgroundBrush" Color="{ThemeResource CloseButtonPressedBackgroundColor}" />
             <SolidColorBrush x:Key="CloseButtonHoverTextBrush" Color="{ThemeResource CloseButtonHoverTextColor}" />
-            
-            <!-- 选区焦点框 -->
-            <SolidColorBrush x:Key="FocusBorderBrush" Color="#FF4CC2FF" />
-            <SolidColorBrush x:Key="FocusFillBrush" Color="#224CC2FF" />
-            
-            <!-- 交互遮罩层 -->
-            <SolidColorBrush x:Key="CardGrabbedOverlayBrush" Color="#33000000" />
-            <SolidColorBrush x:Key="CardPressedOverlayBrush" Color="#22000000" />
+            <SolidColorBrush x:Key="ThumbnailPlaceholderTextBrush" Color="{ThemeResource ThumbnailPlaceholderTextColor}" />
         </ResourceDictionary>
 
         <ResourceDictionary x:Key="Light">
-            <!-- 亚克力及窗口全局 -->
+            <!-- 亚克力及窗口全局（严格保持 key 值和值不变） -->
             <Color x:Key="AcrylicTintColor">#FFFFFFFF</Color>
             <Color x:Key="AcrylicLuminosityColor">#FFFFFFFF</Color>
             <Color x:Key="AcrylicFallbackColor">#FFF3F3F3</Color>
@@ -57,36 +63,42 @@
             <x:Double x:Key="AcrylicInactiveTintOpacity">0.90</x:Double>
             <x:Double x:Key="AcrylicLuminosityOpacity">0.10</x:Double>
             <x:Double x:Key="AcrylicSaturation">1.70</x:Double>
-            
-            <SolidColorBrush x:Key="RootBackdropBrush" Color="#00000000" />
-            <SolidColorBrush x:Key="ContainerBorderBrush" Color="#33000000" />
-            
-            <!-- 卡片配色 -->
-            <SolidColorBrush x:Key="CardBackgroundBrush" Color="#FFFFFFFF" />
-            <SolidColorBrush x:Key="TitleBackgroundBrush" Color="#FFF9F9F9" />
-            <SolidColorBrush x:Key="TitleHoverBackgroundBrush" Color="#FFFFFFFF" />
-            <SolidColorBrush x:Key="TitlePressedBackgroundBrush" Color="#FFF0F0F0" />
-            <SolidColorBrush x:Key="TitleGrabbedBackgroundBrush" Color="#FFE8E8E8" />
-            <SolidColorBrush x:Key="ContentBackgroundBrush" Color="#FFF5F5F5" />
-            
-            <!-- 文字和按钮 -->
-            <SolidColorBrush x:Key="PrimaryTextBrush" Color="#E8121212" />
-            <SolidColorBrush x:Key="SecondaryTextBrush" Color="#99202020" />
-            <SolidColorBrush x:Key="IconTextBrush" Color="#CC202020" />
+
+            <!-- 官方标准 UI 主题色彩键值（Light） -->
+            <SolidColorBrush x:Key="SolidBackgroundFillColorBaseBrush" Color="#FFF3F3F3" />
+            <SolidColorBrush x:Key="CardBackgroundFillColorDefaultBrush" Color="#FFFFFFFF" />
+            <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#33000000" />
+            <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="#0F000000" />
+
+            <SolidColorBrush x:Key="ControlAltFillColorSecondaryBrush" Color="#06000000" />
+            <SolidColorBrush x:Key="ControlAltFillColorTertiaryBrush" Color="#09000000" />
+            <SolidColorBrush x:Key="ControlAltFillColorQuarternaryBrush" Color="#12000000" />
+            <SolidColorBrush x:Key="ControlAltFillColorDisabledBrush" Color="#03000000" />
+
+            <SolidColorBrush x:Key="TextFillColorPrimaryBrush" Color="#E8121212" />
+            <SolidColorBrush x:Key="TextFillColorSecondaryBrush" Color="#99202020" />
+            <SolidColorBrush x:Key="TextFillColorTertiaryBrush" Color="#66202020" />
+
+            <SolidColorBrush x:Key="AccentFillColorDefaultBrush" Color="#FF0078D4" />
+            <SolidColorBrush x:Key="AccentFillColorSecondaryBrush" Color="#FF0078D4" Opacity="0.13" />
+            <SolidColorBrush x:Key="TextOnAccentFillColorPrimaryBrush" Color="#FFFFFF" />
+
+            <Color x:Key="ControlFillColorTransparent">#00000000</Color>
+            <SolidColorBrush x:Key="ControlFillColorDefaultBrush" Color="#09000000" />
+            <SolidColorBrush x:Key="ControlFillColorSecondaryBrush" Color="#0D000000" />
+            <SolidColorBrush x:Key="ControlFillColorTransparentBrush" Color="{ThemeResource ControlFillColorTransparent}" />
+
+            <!-- 切换窗口专用的关闭按钮辅助键 -->
             <Color x:Key="ButtonTextColor">#FF000000</Color>
             <Color x:Key="CloseButtonHoverBackgroundColor">#FFC42B1C</Color>
+            <Color x:Key="CloseButtonPressedBackgroundColor">#FFF1707A</Color>
             <Color x:Key="CloseButtonHoverTextColor">#FFFFFFFF</Color>
+            <Color x:Key="ThumbnailPlaceholderTextColor">#66000000</Color>
             <SolidColorBrush x:Key="ButtonTextBrush" Color="{ThemeResource ButtonTextColor}" />
             <SolidColorBrush x:Key="CloseButtonHoverBackgroundBrush" Color="{ThemeResource CloseButtonHoverBackgroundColor}" />
+            <SolidColorBrush x:Key="CloseButtonPressedBackgroundBrush" Color="{ThemeResource CloseButtonPressedBackgroundColor}" />
             <SolidColorBrush x:Key="CloseButtonHoverTextBrush" Color="{ThemeResource CloseButtonHoverTextColor}" />
-            
-            <!-- 选区焦点框 -->
-            <SolidColorBrush x:Key="FocusBorderBrush" Color="#FF0078D4" />
-            <SolidColorBrush x:Key="FocusFillBrush" Color="#220078D4" />
-            
-            <!-- 交互遮罩层 -->
-            <SolidColorBrush x:Key="CardGrabbedOverlayBrush" Color="#33000000" />
-            <SolidColorBrush x:Key="CardPressedOverlayBrush" Color="#22000000" />
+            <SolidColorBrush x:Key="ThumbnailPlaceholderTextBrush" Color="{ThemeResource ThumbnailPlaceholderTextColor}" />
         </ResourceDictionary>
     </ResourceDictionary.ThemeDictionaries>
 </ResourceDictionary>

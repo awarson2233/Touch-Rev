@@ -2,6 +2,7 @@
 
 #include "common/Win32Error.h"
 #include <dwmapi.h>
+#include <winrt/Windows.UI.ViewManagement.h>
 
 namespace
 {
@@ -50,16 +51,12 @@ constexpr COLORREF kDwmColorNone = DWMWA_COLOR_NONE;
 constexpr COLORREF kDwmColorNone = 0xFFFFFFFE;
 #endif
 
-winrt::Windows::UI::Color Color(unsigned char a, unsigned char r, unsigned char g, unsigned char b)
-{
-    return {a, r, g, b};
-}
 }
 
-void ThemeManager::Initialize(HWND hwnd)
+void ThemeManager::Initialize(HWND hwnd, bool isDialog)
 {
+    isDialog_ = isDialog;
     mode_ = ReadSystemTheme();
-    palette_ = PaletteForTheme(mode_);
     if (hwnd)
     {
         ApplyWindowBackdrop(hwnd);
@@ -80,18 +77,7 @@ bool ThemeManager::Refresh(HWND hwnd)
     }
 
     mode_ = newMode;
-    palette_ = PaletteForTheme(mode_);
     return true;
-}
-
-AppSwitcherPalette ThemeManager::PaletteForActivationState(bool active) const
-{
-    AppSwitcherPalette palette = palette_;
-    if (!active)
-    {
-        palette.focusFill = Color(0x00, 0x00, 0x00, 0x00);
-    }
-    return palette;
 }
 
 void ThemeManager::ApplyWindowBackdrop(HWND hwnd) const
@@ -105,6 +91,22 @@ void ThemeManager::ApplyWindowBackdrop(HWND hwnd) const
     if (FAILED(hr))
     {
         DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)", hr);
+    }
+
+    if (isDialog_)
+    {
+        // 允许对话框圆角
+        int cornerPreference = 2; // DWMWCP_ROUND
+        hr = DwmSetWindowAttribute(
+            hwnd,
+            kDwmwaWindowCornerPreference,
+            &cornerPreference,
+            sizeof(cornerPreference));
+        if (FAILED(hr))
+        {
+            DebugLogHResult(L"DwmSetWindowAttribute(DWMWA_WINDOW_CORNER_PREFERENCE)", hr);
+        }
+        return;
     }
 
     int cornerPreference = kDwmwcpDoNotRound;
@@ -161,71 +163,19 @@ void ThemeManager::ApplyWindowBackdrop(HWND hwnd) const
 
 AppThemeMode ThemeManager::ReadSystemTheme()
 {
-    DWORD value = 0;
-    DWORD valueSize = sizeof(value);
-    const LSTATUS status = RegGetValueW(
-        HKEY_CURRENT_USER,
-        kPersonalizeKey,
-        kAppsUseLightThemeValue,
-        RRF_RT_REG_DWORD,
-        nullptr,
-        &value,
-        &valueSize);
-
-    if (status != ERROR_SUCCESS)
+    try
     {
-        return AppThemeMode::Dark;
+        winrt::Windows::UI::ViewManagement::UISettings settings;
+        auto color = settings.GetColorValue(winrt::Windows::UI::ViewManagement::UIColorType::Background);
+        if (color.R > 128 && color.G > 128 && color.B > 128)
+        {
+            return AppThemeMode::Light;
+        }
     }
-
-    return value == 0 ? AppThemeMode::Dark : AppThemeMode::Light;
+    catch (...)
+    {
+    }
+    return AppThemeMode::Dark;
 }
 
-AppSwitcherPalette ThemeManager::PaletteForTheme(AppThemeMode mode)
-{
-    if (mode == AppThemeMode::Light)
-    {
-        return {
-            Color(0x00, 0x00, 0x00, 0x00),
-            Color(0xE8, 0xF3, 0xF3, 0xF3),
-            Color(0x33, 0x00, 0x00, 0x00),
-            Color(0xFF, 0xFF, 0xFF, 0xFF),
-            Color(0xFF, 0xF9, 0xF9, 0xF9),
-            Color(0xFF, 0xFF, 0xFF, 0xFF),
-            Color(0xFF, 0xF0, 0xF0, 0xF0),
-            Color(0xFF, 0xE8, 0xE8, 0xE8),
-            Color(0xFF, 0xF5, 0xF5, 0xF5),
-            Color(0xE8, 0x12, 0x12, 0x12),
-            Color(0x99, 0x20, 0x20, 0x20),
-            Color(0xCC, 0x20, 0x20, 0x20),
-            Color(0xFF, 0x00, 0x00, 0x00),
-            Color(0xFF, 0xC4, 0x2B, 0x1C),
-            Color(0xFF, 0xFF, 0xFF, 0xFF),
-            Color(0xFF, 0x00, 0x78, 0xD4),
-            Color(0x22, 0x00, 0x78, 0xD4),
-            Color(0x33, 0x00, 0x00, 0x00),
-            Color(0x22, 0x00, 0x00, 0x00),
-        };
-    }
 
-    return {
-        Color(0x00, 0x00, 0x00, 0x00),
-        Color(0xCC, 0x18, 0x18, 0x18),
-        Color(0x55, 0xFF, 0xFF, 0xFF),
-        Color(0xEE, 0x24, 0x24, 0x24),
-        Color(0xFF, 0x27, 0x27, 0x27),
-        Color(0xFF, 0x32, 0x32, 0x32),
-        Color(0xFF, 0x22, 0x22, 0x22),
-        Color(0xFF, 0x1F, 0x1F, 0x1F),
-        Color(0xFF, 0x10, 0x10, 0x10),
-        Color(0xFF, 0xFF, 0xFF, 0xFF),
-        Color(0xCC, 0xFF, 0xFF, 0xFF),
-        Color(0xCC, 0xFF, 0xFF, 0xFF),
-        Color(0xFF, 0xFF, 0xFF, 0xFF),
-        Color(0xFF, 0xC4, 0x2B, 0x1C),
-        Color(0xFF, 0xFF, 0xFF, 0xFF),
-        Color(0xFF, 0x4C, 0xC2, 0xFF),
-        Color(0x22, 0x4C, 0xC2, 0xFF),
-        Color(0x33, 0x00, 0x00, 0x00),
-        Color(0x22, 0x00, 0x00, 0x00),
-    };
-}

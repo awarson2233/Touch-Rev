@@ -44,10 +44,7 @@ float GetMonitorDpi(HMONITOR monitor)
     return static_cast<float>(dpiX);
 }
 
-
-
 }
-
 
 bool MainWindow::Initialize(HINSTANCE instance, int showCommand)
 {
@@ -216,8 +213,6 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         minMaxInfo->ptMaxTrackSize.y = 16384;
         return 0;
     }
-
-
     case WM_CREATE:
         return SUCCEEDED(OnCreate()) ? 0 : -1;
 
@@ -421,7 +416,7 @@ HRESULT MainWindow::OnCreate()
         DebugLog(L"XAML AppSwitcher view initialization failed.");
         return E_FAIL;
     }
-    appSwitcherMainView_.ApplyTheme(themeManager_.Palette(), true);
+    appSwitcherMainView_.ApplyTheme(themeManager_.Mode(), true);
  
     SetTimer(hwnd_, kGestureTimerId, kGestureTimerMs, nullptr);
 
@@ -517,16 +512,15 @@ void MainWindow::RefreshTheme()
     const bool changed = themeManager_.Refresh(hwnd_);
     if (changed)
     {
-        appSwitcherMainView_.ApplyTheme(themeManager_.PaletteForActivationState(activationSucceeded_), activationSucceeded_);
+        appSwitcherMainView_.ApplyTheme(themeManager_.Mode(), activationSucceeded_);
     }
 }
 
 void MainWindow::ApplyActivationVisualState(bool active)
 {
-    activationPending_ = false;
     activationSucceeded_ = active && GetForegroundWindow() == hwnd_;
     keyboardNavigationEnabled_ = activationSucceeded_;
-    appSwitcherMainView_.ApplyTheme(themeManager_.PaletteForActivationState(activationSucceeded_), activationSucceeded_);
+    appSwitcherMainView_.ApplyTheme(themeManager_.Mode(), activationSucceeded_);
 }
 
 MainWindow::ActivationResult MainWindow::TryActivateSwitcher()
@@ -542,7 +536,24 @@ MainWindow::ActivationResult MainWindow::TryActivateSwitcher()
         return result;
     }
 
+    // 第一次尝试：直接调用 SetForegroundWindow
     result.directSucceeded = SetForegroundWindow(hwnd_) != FALSE && GetForegroundWindow() == hwnd_;
+
+    // 回退：如果直接激活失败，通过 AttachThreadInput 借用前台线程的输入权限
+    if (!result.directSucceeded)
+    {
+        const DWORD foregroundThreadId = GetWindowThreadProcessId(result.actualForeground, nullptr);
+        const DWORD currentThreadId = GetCurrentThreadId();
+
+        if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId)
+        {
+            AttachThreadInput(currentThreadId, foregroundThreadId, TRUE);
+            BringWindowToTop(hwnd_);
+            result.directSucceeded = SetForegroundWindow(hwnd_) != FALSE;
+            AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
+        }
+    }
+
     if (result.directSucceeded)
     {
         SetActiveWindow(hwnd_);
@@ -615,7 +626,6 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
 
     SyncClientLayout(width, height, true);
 
-    activationPending_ = true;
     activationSucceeded_ = false;
     keyboardNavigationEnabled_ = false;
 
@@ -629,9 +639,12 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
         SWP_NOACTIVATE | SWP_FRAMECHANGED);
 
     RefreshTheme();
-    appSwitcherMainView_.ApplyTheme(themeManager_.Palette(), true);
-    ShowWindow(hwnd_, SW_SHOWNA);
+    appSwitcherMainView_.ApplyTheme(themeManager_.Mode(), true);
+
+    // 先 Uncloak 使窗口对 DWM 可见，再 ShowWindow(SW_SHOW) 同时请求激活
+    // 这样在显示的瞬间即建立激活上下文，避免事后争前台权限失败
     touchrev::common::dwm::SetWindowCloaked(hwnd_, false);
+    ShowWindow(hwnd_, SW_SHOW);
     isVisible_ = true;
 
     const ActivationResult activation = TryActivateSwitcher();
@@ -657,7 +670,6 @@ void MainWindow::Hide()
     isLongPressNavigating_ = false;
     pendingLongPressActivation_ = false;
     activationSucceeded_ = false;
-    activationPending_ = false;
     keyboardNavigationEnabled_ = false;
 }
 

@@ -127,7 +127,6 @@ int Fail(const std::wstring& message) {
     touchrev::LogMessage(L"injector", touchrev::LogLevel::Error,
                          L"event=FAILED message=%s", message.c_str());
     std::wcerr << L"ERROR: " << message << L"\n";
-    std::wcerr << L"Log: " << touchrev::GetLogPath() << L"\n";
     touchrev::ShutdownLog();
     return 1;
 }
@@ -305,7 +304,6 @@ int wmain(int argc, wchar_t** argv) {
         return 2;
     }
 
-    std::wcout << L"Log: " << touchrev::GetLogPath() << L"\n";
     touchrev::ShutdownLog();
     return 0;
 }

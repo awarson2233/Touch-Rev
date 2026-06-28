@@ -1,5 +1,5 @@
-#include "ui/MainWindow.h"
-#include "ui/ConfigWindow.h"
+#include "ui/switcher/MainWindow.h"
+#include "ui/config/ConfigWindow.h"
 #include "common/Win32Error.h"
 
 #include <windows.h>

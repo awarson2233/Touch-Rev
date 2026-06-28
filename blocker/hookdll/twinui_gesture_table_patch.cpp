@@ -272,6 +272,8 @@ bool InstallTwinuiGestureTablePatch() {
         return true;
     }
 
+    UpdateRegistryStatus(1, 0);
+
     DirectHookTarget normalTableStart{};
     DirectHookTarget gamingTableStart{};
     if (!ResolveDataSymbol(L"TouchGestureSettings::s_gestureTargets",
@@ -281,6 +283,7 @@ bool InstallTwinuiGestureTablePatch() {
             kGestureTargetsForGamingSymbol, &gamingTableStart)) {
         LogMessage(L"hookdll", LogLevel::Warning,
                    L"event=TWINUI_GESTURE_TABLE_PATCH_SKIPPED reason=primary-symbol-resolve-failed");
+        UpdateRegistryStatus(3, 2);
         return false;
     }
 
@@ -289,6 +292,7 @@ bool InstallTwinuiGestureTablePatch() {
                                 L"s_gestureTargets", &normalRange)) {
         LogMessage(L"hookdll", LogLevel::Warning,
                    L"event=TWINUI_GESTURE_TABLE_PATCH_SKIPPED reason=normal-range-validation-failed");
+        UpdateRegistryStatus(3, 2);
         return false;
     }
 
@@ -318,6 +322,7 @@ bool InstallTwinuiGestureTablePatch() {
         RestoreAppliedPatches(&records);
         LogMessage(L"hookdll", LogLevel::Error,
                    L"event=TWINUI_GESTURE_TABLE_PATCH_FAILED reason=write-failed");
+        UpdateRegistryStatus(3, 2);
         return false;
     }
 
@@ -325,6 +330,7 @@ bool InstallTwinuiGestureTablePatch() {
         LogMessage(L"hookdll", LogLevel::Warning,
                    L"event=TWINUI_GESTURE_TABLE_PATCH_SKIPPED reason=no-matching-entries normalCount=%zu gamingCount=%zu",
                    normalRange.count, gamingRange.count);
+        UpdateRegistryStatus(3, 2);
         return false;
     }
 
@@ -333,6 +339,8 @@ bool InstallTwinuiGestureTablePatch() {
     LogMessage(L"hookdll", LogLevel::Info,
                L"event=TWINUI_GESTURE_TABLE_PATCH_INSTALLED patchCount=%zu",
                g_patchRecords.size());
+    
+    UpdateRegistryStatus(2, 1);
     return true;
 }
 
@@ -359,6 +367,8 @@ bool UninstallTwinuiGestureTablePatch() {
                g_patchRecords.size());
     g_patchRecords.clear();
     g_tablePatchInstalled = false;
+
+    UpdateRegistryStatus(2, 0);
     return true;
 }
 

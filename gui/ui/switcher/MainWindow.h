@@ -1,7 +1,7 @@
 #pragma once
 
 #include "ThinXamlAppSwitcherHost.h"
-#include "ThemeManager.h"
+#include "ui/shared/ThemeManager.h"
 #include "MainView.h"
 #include "common/CoordinateSpace.h"
 #include "input/InputController.h"
@@ -86,6 +86,5 @@ private:
     bool isLongPressNavigating_ = false;
     bool pendingLongPressActivation_ = false;
     bool activationSucceeded_ = false;
-    bool activationPending_ = false;
     bool keyboardNavigationEnabled_ = false;
 };

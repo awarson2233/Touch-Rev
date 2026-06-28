@@ -1,22 +1,22 @@
 add_executable(TouchRevGUI WIN32
     main.cpp
     TouchRevGUI.rc
-    ui/MainWindow.cpp
-    ui/MainWindow.h
-    ui/ConfigWindow.cpp
-    ui/ConfigWindow.h
-    ui/CardView.cpp
-    ui/CardView.h
-    ui/LayoutEngine.cpp
-    ui/LayoutEngine.h
-    ui/WindowController.cpp
-    ui/WindowController.h
-    ui/MainView.cpp
-    ui/MainView.h
-    ui/ThinXamlAppSwitcherHost.cpp
-    ui/ThinXamlAppSwitcherHost.h
-    ui/ThemeManager.cpp
-    ui/ThemeManager.h
+    ui/switcher/MainWindow.cpp
+    ui/switcher/MainWindow.h
+    ui/config/ConfigWindow.cpp
+    ui/config/ConfigWindow.h
+    ui/switcher/CardView.cpp
+    ui/switcher/CardView.h
+    ui/switcher/LayoutEngine.cpp
+    ui/switcher/LayoutEngine.h
+    ui/switcher/WindowController.cpp
+    ui/switcher/WindowController.h
+    ui/switcher/MainView.cpp
+    ui/switcher/MainView.h
+    ui/switcher/ThinXamlAppSwitcherHost.cpp
+    ui/switcher/ThinXamlAppSwitcherHost.h
+    ui/shared/ThemeManager.cpp
+    ui/shared/ThemeManager.h
     thumbnail/PrivateThumbnailInterfaces.h
     thumbnail/PrivateThumbnailManager.cpp
     thumbnail/PrivateThumbnailManager.h

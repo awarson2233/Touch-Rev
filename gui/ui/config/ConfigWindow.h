@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ThemeManager.h"
+#include "ui/shared/ThemeManager.h"
 
 #include <windows.h>
 #include <inspectable.h>
@@ -39,8 +39,13 @@ private:
     // 独立的 XAML Island 宿主相关成员，解耦 ThinXamlAppSwitcherHost
     winrt::Windows::UI::Xaml::Hosting::WindowsXamlManager xamlManager_{nullptr};
     winrt::Windows::UI::Xaml::Hosting::DesktopWindowXamlSource xamlSource_{nullptr};
+    winrt::Windows::UI::Xaml::Controls::Grid root_{nullptr};
+
+    void UpdateXamlTheme();
 
     // UI elements
+    winrt::Windows::UI::Xaml::Controls::TextBlock hookStatusText_{nullptr};
+
     winrt::Windows::UI::Xaml::Controls::ToggleSwitch hookToggle_{nullptr};
     winrt::Windows::UI::Xaml::Controls::ToggleSwitch gestureToggle_{nullptr};
     winrt::Windows::UI::Xaml::Controls::ToggleSwitch windowToggle_{nullptr};

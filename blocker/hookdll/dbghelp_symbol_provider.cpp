@@ -1,4 +1,5 @@
 #include "hookdll/dbghelp_symbol_provider.h"
+#include "hookdll/twinui_gesture_table_patch.h"
 
 #include "common/log.h"
 #include "common/winutil.h"
@@ -427,8 +428,10 @@ bool InitializeDbgHelpSession() {
         }
     }
 
-    DWORD options = SYMOPT_UNDNAME | SYMOPT_FAIL_CRITICAL_ERRORS |
-                    SYMOPT_NO_PROMPTS | SYMOPT_EXACT_SYMBOLS;
+    DWORD options = SymGetOptions();
+    options |= SYMOPT_UNDNAME | SYMOPT_FAIL_CRITICAL_ERRORS |
+               SYMOPT_NO_PROMPTS | SYMOPT_EXACT_SYMBOLS;
+    options &= ~SYMOPT_DEFERRED_LOADS;
     SymSetOptions(options);
 
     if (!SymInitializeW(g_symbolSession, nullptr, FALSE)) {
@@ -625,6 +628,8 @@ bool DownloadPdbFromMicrosoft(const DirectHookSpec& spec,
                GuidToString(identity.guid).c_str(), identity.age, downloadPath.c_str(),
                targetPath.c_str());
 
+    UpdateRegistryStatus(1, 0);
+
     HANDLE session = WinHttpOpen(L"TouchRevHook/0.1",
                                  WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
                                  WINHTTP_NO_PROXY_NAME,
@@ -742,6 +747,7 @@ bool DownloadPdbFromMicrosoft(const DirectHookSpec& spec,
                    error == ERROR_SUCCESS ? ERROR_FILE_NOT_FOUND : error,
                    FormatLastError(error == ERROR_SUCCESS ? ERROR_FILE_NOT_FOUND : error)
                        .c_str());
+        UpdateRegistryStatus(3, 0);
         return false;
     }
 
@@ -857,6 +863,7 @@ bool LoadAndVerifyExactPdb(const DirectHookSpec& spec,
                L"event=PDB_EXACT_LOAD_REJECTED api=%s moduleName=%s module=0x%p mode=%s pdb=%s",
                ApiName(spec), SafeString(spec.moduleName), module,
                SafeString(mode), foundPdbPath.c_str());
+    UpdateRegistryStatus(4, 0);
     return false;
 }
 
@@ -1148,6 +1155,19 @@ bool TryResolveDbgHelpSymbolAddress(const DirectHookSpec& spec,
     }
 
     return TryEnumerateSymbol(spec, module, identity, result);
+}
+
+void ShutdownDbgHelpSession() {
+    std::lock_guard<std::mutex> lock(g_dbgHelpMutex);
+    if (g_symbolSessionInitialized) {
+        if (g_symbolSession) {
+            SymCleanup(g_symbolSession);
+            CloseHandle(g_symbolSession);
+            g_symbolSession = nullptr;
+        }
+        g_symbolSessionInitialized = false;
+        LogMessage(L"hookdll", LogLevel::Info, L"event=DBGHELP_SHUTDOWN_OK");
+    }
 }
 
 }  // namespace touchrev
