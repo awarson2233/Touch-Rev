@@ -3,6 +3,7 @@
 
 #include "common/log.h"
 #include "common/winutil.h"
+#include "common/blocker_status.h"
 
 #include <dbghelp.h>
 #include <windows.h>
@@ -13,6 +14,7 @@
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
+#include <cwchar>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -484,7 +486,8 @@ bool VerifyLoadedPdbIdentityWithEvent(const DirectHookSpec& spec,
                                       const PdbIdentity& identity,
                                       PCWSTR matchEvent,
                                       PCWSTR mismatchEvent,
-                                      DbgHelpSymbolResolveResult* result) {
+                                      DbgHelpSymbolResolveResult* result,
+                                      std::wstring* loadedPdbPath = nullptr) {
     IMAGEHLP_MODULEW64 moduleInfo{};
     DWORD64 base = reinterpret_cast<DWORD64>(module);
     if (!QueryLoadedPdbInfo(base, &moduleInfo)) {
@@ -497,6 +500,10 @@ bool VerifyLoadedPdbIdentityWithEvent(const DirectHookSpec& spec,
             result->error = error;
         }
         return false;
+    }
+
+    if (loadedPdbPath) {
+        loadedPdbPath->assign(moduleInfo.LoadedPdbName);
     }
 
     bool matches = PdbInfoMatchesIdentity(moduleInfo, identity);
@@ -576,6 +583,38 @@ std::wstring BuildExactPdbCachePath(const std::wstring& cacheRoot,
            GuidToSymbolIndex(identity.guid, identity.age) + L"\\" + pdbFileName;
 }
 
+bool HasPathSeparator(std::wstring_view value) {
+    return value.find(L'\\') != std::wstring_view::npos ||
+           value.find(L'/') != std::wstring_view::npos;
+}
+
+BlockerPdbSource PdbSourceFromMode(PCWSTR mode) {
+    if (mode && wcscmp(mode, L"cache") == 0) {
+        return BlockerPdbSource::Cache;
+    }
+    if (mode && wcscmp(mode, L"download") == 0) {
+        return BlockerPdbSource::Download;
+    }
+    return BlockerPdbSource::None;
+}
+
+BlockerPdbSource ClassifyLoadedPdbSource(BlockerPdbSource requestedSource,
+                                         const std::wstring& expectedPath,
+                                         const std::wstring& loadedPath) {
+    if (expectedPath.empty() || loadedPath.empty() || !HasPathSeparator(loadedPath)) {
+        return requestedSource;
+    }
+
+    std::wstring fullExpected = GetFullPath(expectedPath);
+    std::wstring fullLoaded = GetFullPath(loadedPath);
+    if (!fullExpected.empty() && !fullLoaded.empty() &&
+        !EqualsIgnoreCase(fullExpected, fullLoaded)) {
+        return BlockerPdbSource::External;
+    }
+
+    return requestedSource;
+}
+
 std::wstring BuildPdbDownloadPath(const PdbIdentity& identity) {
     std::wstring pdbFileName = PdbFileNameFromIdentity(identity);
     if (pdbFileName.empty()) {
@@ -603,10 +642,15 @@ bool DownloadPdbFromMicrosoft(const DirectHookSpec& spec,
 
     std::wstring pdbFileName = PdbFileNameFromIdentity(identity);
     std::wstring downloadPath = BuildPdbDownloadPath(identity);
+    std::wstring guidAge = GuidToSymbolIndex(identity.guid, identity.age);
     if (pdbFileName.empty() || downloadPath.empty()) {
         if (errorOut) {
             *errorOut = ERROR_INVALID_DATA;
         }
+        UpdateBlockerPdbStatus(BlockerPdbStatus::DownloadFailed,
+                               BlockerPdbSource::Download,
+                               targetPath.c_str(), nullptr, guidAge.c_str(),
+                               ERROR_INVALID_DATA, L"PDB_DOWNLOAD_PATH_INVALID");
         return false;
     }
 
@@ -619,6 +663,10 @@ bool DownloadPdbFromMicrosoft(const DirectHookSpec& spec,
         LogMessage(L"hookdll", LogLevel::Warning,
                    L"event=PDB_CACHE_DIR_FAILED path=%s error=%lu message=%s",
                    targetDirectory.c_str(), error, FormatLastError(error).c_str());
+        UpdateBlockerPdbStatus(BlockerPdbStatus::DownloadFailed,
+                               BlockerPdbSource::Download,
+                               targetPath.c_str(), nullptr, guidAge.c_str(),
+                               error, L"PDB_CACHE_DIR_FAILED");
         return false;
     }
 
@@ -628,7 +676,10 @@ bool DownloadPdbFromMicrosoft(const DirectHookSpec& spec,
                GuidToString(identity.guid).c_str(), identity.age, downloadPath.c_str(),
                targetPath.c_str());
 
-    UpdateRegistryStatus(1, 0);
+    UpdateBlockerPdbStatus(BlockerPdbStatus::Resolving,
+                           BlockerPdbSource::Download,
+                           targetPath.c_str(), nullptr, guidAge.c_str(),
+                           ERROR_SUCCESS, L"PDB_DOWNLOAD_START");
 
     HANDLE session = WinHttpOpen(L"TouchRevHook/0.1",
                                  WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY,
@@ -639,6 +690,10 @@ bool DownloadPdbFromMicrosoft(const DirectHookSpec& spec,
         if (errorOut) {
             *errorOut = error;
         }
+        UpdateBlockerPdbStatus(BlockerPdbStatus::DownloadFailed,
+                               BlockerPdbSource::Download,
+                               targetPath.c_str(), nullptr, guidAge.c_str(),
+                               error, L"PDB_DOWNLOAD_SESSION_FAILED");
         return false;
     }
 
@@ -650,6 +705,10 @@ bool DownloadPdbFromMicrosoft(const DirectHookSpec& spec,
         if (errorOut) {
             *errorOut = error;
         }
+        UpdateBlockerPdbStatus(BlockerPdbStatus::DownloadFailed,
+                               BlockerPdbSource::Download,
+                               targetPath.c_str(), nullptr, guidAge.c_str(),
+                               error, L"PDB_DOWNLOAD_CONNECT_FAILED");
         return false;
     }
 
@@ -664,6 +723,10 @@ bool DownloadPdbFromMicrosoft(const DirectHookSpec& spec,
         if (errorOut) {
             *errorOut = error;
         }
+        UpdateBlockerPdbStatus(BlockerPdbStatus::DownloadFailed,
+                               BlockerPdbSource::Download,
+                               targetPath.c_str(), nullptr, guidAge.c_str(),
+                               error, L"PDB_DOWNLOAD_REQUEST_FAILED");
         return false;
     }
 
@@ -747,7 +810,11 @@ bool DownloadPdbFromMicrosoft(const DirectHookSpec& spec,
                    error == ERROR_SUCCESS ? ERROR_FILE_NOT_FOUND : error,
                    FormatLastError(error == ERROR_SUCCESS ? ERROR_FILE_NOT_FOUND : error)
                        .c_str());
-        UpdateRegistryStatus(3, 0);
+        UpdateBlockerPdbStatus(BlockerPdbStatus::DownloadFailed,
+                               BlockerPdbSource::Download,
+                               targetPath.c_str(), nullptr, guidAge.c_str(),
+                               error == ERROR_SUCCESS ? ERROR_FILE_NOT_FOUND : error,
+                               L"PDB_DOWNLOAD_FAILED");
         return false;
     }
 
@@ -762,6 +829,10 @@ bool DownloadPdbFromMicrosoft(const DirectHookSpec& spec,
                    L"event=PDB_DOWNLOAD_MOVE_FAILED api=%s moduleName=%s module=0x%p target=%s error=%lu message=%s",
                    ApiName(spec), SafeString(spec.moduleName), module, targetPath.c_str(),
                    error, FormatLastError(error).c_str());
+        UpdateBlockerPdbStatus(BlockerPdbStatus::DownloadFailed,
+                               BlockerPdbSource::Download,
+                               targetPath.c_str(), nullptr, guidAge.c_str(),
+                               error, L"PDB_DOWNLOAD_MOVE_FAILED");
         return false;
     }
 
@@ -848,22 +919,45 @@ bool LoadAndVerifyExactPdb(const DirectHookSpec& spec,
                            const std::wstring& foundPdbPath,
                            PCWSTR mode,
                            DbgHelpSymbolResolveResult* result) {
+    std::wstring guidAge = GuidToSymbolIndex(identity.guid, identity.age);
+    BlockerPdbSource requestedSource = PdbSourceFromMode(mode);
     if (!LoadModuleSymbolsFromExactPdb(spec, module, foundPdbPath, result)) {
+        DWORD error = result && result->error != ERROR_SUCCESS
+                          ? result->error
+                          : ERROR_INVALID_DATA;
+        UpdateBlockerPdbStatus(BlockerPdbStatus::IdentityMismatch,
+                               requestedSource,
+                               foundPdbPath.c_str(), nullptr, guidAge.c_str(),
+                               error, L"PDB_MODULE_LOAD_FAILED");
         return false;
     }
 
+    std::wstring loadedPdbPath;
     if (VerifyLoadedPdbIdentityWithEvent(spec, module, identity,
                                          L"PDB_EXACT_LOAD_MATCH",
-                                         L"PDB_EXACT_LOAD_MISMATCH", result)) {
+                                         L"PDB_EXACT_LOAD_MISMATCH", result,
+                                         &loadedPdbPath)) {
+        BlockerPdbSource loadedSource = ClassifyLoadedPdbSource(
+            requestedSource, foundPdbPath, loadedPdbPath);
+        UpdateBlockerPdbStatus(BlockerPdbStatus::Loaded, loadedSource,
+                               foundPdbPath.c_str(), loadedPdbPath.c_str(),
+                               guidAge.c_str(), ERROR_SUCCESS,
+                               L"PDB_EXACT_LOAD_MATCH");
         return true;
     }
+
+    DWORD error = result && result->error != ERROR_SUCCESS
+                      ? result->error
+                      : ERROR_INVALID_DATA;
+    UpdateBlockerPdbStatus(BlockerPdbStatus::IdentityMismatch, requestedSource,
+                           foundPdbPath.c_str(), loadedPdbPath.c_str(),
+                           guidAge.c_str(), error, L"PDB_EXACT_LOAD_MISMATCH");
 
     UnloadModuleSymbols(reinterpret_cast<DWORD64>(module));
     LogMessage(L"hookdll", LogLevel::Warning,
                L"event=PDB_EXACT_LOAD_REJECTED api=%s moduleName=%s module=0x%p mode=%s pdb=%s",
                ApiName(spec), SafeString(spec.moduleName), module,
                SafeString(mode), foundPdbPath.c_str());
-    UpdateRegistryStatus(4, 0);
     return false;
 }
 
@@ -880,6 +974,10 @@ bool EnsureExactSymbolsLoaded(const DirectHookSpec& spec,
         LogMessage(L"hookdll", LogLevel::Warning,
                    L"event=PDB_IDENTITY_FAILED api=%s moduleName=%s module=0x%p",
                    ApiName(spec), SafeString(spec.moduleName), module);
+        UpdateBlockerPdbStatus(BlockerPdbStatus::IdentityMismatch,
+                               BlockerPdbSource::None,
+                               nullptr, nullptr, nullptr,
+                               ERROR_INVALID_DATA, L"PDB_IDENTITY_FAILED");
         if (result) {
             result->error = ERROR_INVALID_DATA;
         }
@@ -894,6 +992,12 @@ bool EnsureExactSymbolsLoaded(const DirectHookSpec& spec,
 
     std::wstring cacheRoot = BuildSymbolCacheRoot();
     if (cacheRoot.empty()) {
+        UpdateBlockerPdbStatus(BlockerPdbStatus::DownloadFailed,
+                               BlockerPdbSource::None,
+                               nullptr, nullptr,
+                               GuidToSymbolIndex(currentIdentity.guid,
+                                                 currentIdentity.age).c_str(),
+                               ERROR_PATH_NOT_FOUND, L"PDB_CACHE_DIR_FAILED");
         if (result) {
             result->error = ERROR_PATH_NOT_FOUND;
         }
@@ -901,12 +1005,23 @@ bool EnsureExactSymbolsLoaded(const DirectHookSpec& spec,
     }
 
     std::wstring foundPdbPath = BuildExactPdbCachePath(cacheRoot, currentIdentity);
+    std::wstring guidAge = GuidToSymbolIndex(currentIdentity.guid,
+                                             currentIdentity.age);
     if (foundPdbPath.empty()) {
+        UpdateBlockerPdbStatus(BlockerPdbStatus::IdentityMismatch,
+                               BlockerPdbSource::None,
+                               nullptr, nullptr, guidAge.c_str(),
+                               ERROR_INVALID_DATA, L"PDB_CACHE_PATH_INVALID");
         if (result) {
             result->error = ERROR_INVALID_DATA;
         }
         return false;
     }
+
+    UpdateBlockerPdbStatus(BlockerPdbStatus::Resolving,
+                           BlockerPdbSource::None,
+                           foundPdbPath.c_str(), nullptr, guidAge.c_str(),
+                           ERROR_SUCCESS, L"PDB_RESOLVE_START");
 
     if (FileExists(foundPdbPath)) {
         LogMessage(L"hookdll", LogLevel::Info,
@@ -915,6 +1030,10 @@ bool EnsureExactSymbolsLoaded(const DirectHookSpec& spec,
                    PdbFileNameFromIdentity(currentIdentity).c_str(),
                    GuidToString(currentIdentity.guid).c_str(), currentIdentity.age,
                    foundPdbPath.c_str());
+        UpdateBlockerPdbStatus(BlockerPdbStatus::Resolving,
+                               BlockerPdbSource::Cache,
+                               foundPdbPath.c_str(), nullptr, guidAge.c_str(),
+                               ERROR_SUCCESS, L"PDB_CACHE_MATCH");
 
         if (LoadAndVerifyExactPdb(spec, module, currentIdentity, foundPdbPath,
                                   L"cache", result)) {
@@ -949,6 +1068,10 @@ bool EnsureExactSymbolsLoaded(const DirectHookSpec& spec,
                    PdbFileNameFromIdentity(currentIdentity).c_str(),
                    GuidToString(currentIdentity.guid).c_str(), currentIdentity.age,
                    foundPdbPath.c_str());
+        UpdateBlockerPdbStatus(BlockerPdbStatus::Resolving,
+                               BlockerPdbSource::Download,
+                               foundPdbPath.c_str(), nullptr, guidAge.c_str(),
+                               ERROR_SUCCESS, L"PDB_CACHE_MISS");
     }
 
     DWORD error = ERROR_SUCCESS;
