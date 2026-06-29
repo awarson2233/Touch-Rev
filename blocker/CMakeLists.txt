@@ -27,11 +27,12 @@ if(NOT TOUCHREV_BLOCKER_PLATFORM_UPPER STREQUAL "ARM64" AND
 endif()
 
 add_library(touchrev_blocker_common STATIC
+    common/blocker_status.cpp
     common/log.cpp
     common/winutil.cpp
 )
 target_include_directories(touchrev_blocker_common PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
-target_link_libraries(touchrev_blocker_common PUBLIC user32)
+target_link_libraries(touchrev_blocker_common PUBLIC user32 advapi32)
 target_compile_options(touchrev_blocker_common PRIVATE /W4 /permissive- /EHsc)
 
 if(TOUCHREV_BLOCKER_PLATFORM_UPPER STREQUAL "ARM64")

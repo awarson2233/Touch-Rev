@@ -1,55 +1,93 @@
 <Grid
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-    Background="{ThemeResource ControlFillColorTransparentBrush}">
+    Background="{ThemeResource SolidBackgroundFillColorBaseBrush}">
 
-    <!-- 内容区域 -->
     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Margin="28,20,28,24" VerticalAlignment="Stretch" HorizontalAlignment="Stretch">
+        <StackPanel Margin="24,20,24,20" VerticalAlignment="Stretch" HorizontalAlignment="Stretch">
+            
             <!-- 标题区域 -->
-            <Grid Margin="0,0,0,24">
+            <Grid Margin="0,0,0,16">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- 齿轮配置大图标底盘 -->
-                <Border Grid.Column="0"
-                        Width="44"
-                        Height="44"
-                        CornerRadius="10"
-                        Background="{ThemeResource AccentFillColorDefaultBrush}"
-                        Margin="0,0,16,0"
-                        VerticalAlignment="Center">
-                    <FontIcon FontFamily="Segoe MDL2 Assets"
-                              Glyph="&#xE713;"
-                              FontSize="20"
-                              Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
-                              VerticalAlignment="Center"
-                              HorizontalAlignment="Center"/>
-                </Border>
+                <!-- 手势触控科技感 Logo -->
+                <Grid Grid.Column="0" Width="44" Height="44" Margin="0,0,14,0" VerticalAlignment="Center">
+                    <!-- 外层发光渐变环 -->
+                    <Ellipse Width="42" Height="42" StrokeThickness="1.5">
+                        <Ellipse.Stroke>
+                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
+                                <GradientStop Color="#800078D4" Offset="0"/>
+                                <GradientStop Color="#100078D4" Offset="0.5"/>
+                                <GradientStop Color="#FF0078D4" Offset="1"/>
+                            </LinearGradientBrush>
+                        </Ellipse.Stroke>
+                    </Ellipse>
+                    <!-- 内层半透明底盘 -->
+                    <Ellipse Width="28" Height="28" Fill="{ThemeResource AccentFillColorSecondaryBrush}" Opacity="0.5"/>
+                    <!-- 三指触控点 -->
+                    <Ellipse Width="5" Height="5" Fill="{ThemeResource AccentFillColorDefaultBrush}" Margin="0,0,12,12" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <Ellipse Width="5" Height="5" Fill="{ThemeResource AccentFillColorDefaultBrush}" Margin="10,10,0,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <Ellipse Width="5" Height="5" Fill="{ThemeResource AccentFillColorDefaultBrush}" Margin="0,14,12,0" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    <!-- 手势划过圆弧 -->
+                    <Path Data="M 10 30 C 14 34, 26 34, 30 30" Stroke="{ThemeResource AccentFillColorDefaultBrush}" StrokeThickness="2" StrokeStartLineCap="Round" StrokeEndLineCap="Round" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                </Grid>
 
                 <StackPanel Grid.Column="1" VerticalAlignment="Center">
                     <TextBlock
                         Text="Touch-Rev 控制中心"
-                        FontSize="18"
+                        FontSize="17"
                         FontWeight="SemiBold"
                         Foreground="{ThemeResource TextFillColorPrimaryBrush}"/>
                     <TextBlock
                         Text="定制与优化您的 Windows 触控手势体验"
-                        FontSize="11.5"
+                        FontSize="11"
                         Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                         Margin="0,1,0,0"/>
                 </StackPanel>
             </Grid>
 
+            <!-- 状态呼吸灯 Banner -->
+            <Border BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
+                    Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
+                    BorderThickness="1"
+                    CornerRadius="6"
+                    Padding="12,8,12,8"
+                    Margin="0,0,0,16">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- 状态指示呼吸灯 -->
+                    <Ellipse x:Name="StatusIndicatorDot"
+                             Grid.Column="0"
+                             Width="8"
+                             Height="8"
+                             Fill="{ThemeResource TextFillColorTertiaryBrush}"
+                             VerticalAlignment="Center"
+                             Margin="2,0,10,0"/>
+
+                    <TextBlock x:Name="HookStatusText"
+                               Grid.Column="1"
+                               Text="运行状态：未知"
+                               FontSize="11.5"
+                               FontWeight="Medium"
+                               Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                               VerticalAlignment="Center"/>
+                </Grid>
+            </Border>
+
             <!-- 设置项 1: Hook 拦截 -->
-            <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            <Border BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderThickness="1"
                     CornerRadius="8"
-                    Padding="16,14,16,14"
-                    Margin="0,0,0,12">
+                    Padding="14,12,14,12"
+                    Margin="0,0,0,10">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -57,53 +95,54 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <!-- 图标底圈 -->
+                    <!-- 品牌发光底圈 -->
                     <Border Grid.Column="0"
-                            Width="40"
-                            Height="40"
-                            CornerRadius="20"
-                            Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
-                            Margin="0,0,16,0"
+                            Width="36"
+                            Height="36"
+                            CornerRadius="6"
+                            Background="{ThemeResource AccentFillColorSecondaryBrush}"
+                            Margin="0,0,14,0"
                             VerticalAlignment="Center">
                         <FontIcon FontFamily="Segoe MDL2 Assets"
                                   Glyph="&#xE72E;"
-                                  FontSize="18"
-                                  Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                  FontSize="16"
+                                  Foreground="{ThemeResource AccentFillColorDefaultBrush}"
                                   VerticalAlignment="Center"
                                   HorizontalAlignment="Center"/>
                     </Border>
 
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
                         <TextBlock Text="系统手势 Hook 拦截"
-                                   FontSize="14"
+                                   FontSize="13.5"
                                    FontWeight="SemiBold"
                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"/>
                         <TextBlock Text="拦截 Windows 默认的三四指触控手势，防止与自定义手势冲突"
-                                   FontSize="11.5"
+                                   FontSize="11"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    TextWrapping="Wrap"
-                                   Margin="0,3,0,4"/>
-                        <!-- 运行状态指示器 -->
-                        <TextBlock x:Name="HookStatusText"
-                                   Text="运行状态：未知"
-                                   FontSize="11"
-                                   FontWeight="Medium"/>
+                                   Margin="0,2,0,0"/>
                     </StackPanel>
 
                     <ToggleSwitch x:Name="HookToggle"
                                   Grid.Column="2"
+                                  HorizontalAlignment="Right"
                                   VerticalAlignment="Center"
-                                  IsOn="False"/>
+                                  OnContent=""
+                                  OffContent=""
+                                  IsOn="False"
+                                  MinWidth="0"
+                                  Width="44"
+                                  Margin="0,0,4,0"/>
                 </Grid>
             </Border>
 
             <!-- 设置项 2: 自定义手势 -->
-            <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            <Border BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderThickness="1"
                     CornerRadius="8"
-                    Padding="16,14,16,14"
-                    Margin="0,0,0,12">
+                    Padding="14,12,14,12"
+                    Margin="0,0,0,10">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -111,47 +150,53 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <!-- 图标底圈 -->
                     <Border Grid.Column="0"
-                            Width="40"
-                            Height="40"
-                            CornerRadius="20"
-                            Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
-                            Margin="0,0,16,0"
+                            Width="36"
+                            Height="36"
+                            CornerRadius="6"
+                            Background="{ThemeResource AccentFillColorSecondaryBrush}"
+                            Margin="0,0,14,0"
                             VerticalAlignment="Center">
                         <FontIcon FontFamily="Segoe MDL2 Assets"
                                   Glyph="&#xE815;"
-                                  FontSize="18"
-                                  Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                  FontSize="16"
+                                  Foreground="{ThemeResource AccentFillColorDefaultBrush}"
                                   VerticalAlignment="Center"
                                   HorizontalAlignment="Center"/>
                     </Border>
 
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
                         <TextBlock Text="自定义手势识别"
-                                   FontSize="14"
+                                   FontSize="13.5"
                                    FontWeight="SemiBold"
                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"/>
                         <TextBlock Text="启用本程序自定义的三指滑动与三指长按触发手势"
-                                   FontSize="11.5"
+                                   FontSize="11"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    TextWrapping="Wrap"
-                                   Margin="0,3,0,0"/>
+                                   Margin="0,2,0,0"/>
                     </StackPanel>
+                    
                     <ToggleSwitch x:Name="GestureToggle"
                                   Grid.Column="2"
+                                  HorizontalAlignment="Right"
                                   VerticalAlignment="Center"
-                                  IsOn="True"/>
+                                  OnContent=""
+                                  OffContent=""
+                                  IsOn="True"
+                                  MinWidth="0"
+                                  Width="44"
+                                  Margin="0,0,4,0"/>
                 </Grid>
             </Border>
 
             <!-- 设置项 3: 任务切换卡片 -->
-            <Border BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            <Border BorderBrush="{ThemeResource ControlStrokeColorDefaultBrush}"
                     Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
                     BorderThickness="1"
                     CornerRadius="8"
-                    Padding="16,14,16,14"
-                    Margin="0,0,0,24">
+                    Padding="14,12,14,12"
+                    Margin="0,0,0,20">
                 <Grid>
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto"/>
@@ -159,49 +204,64 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
 
-                    <!-- 图标底圈 -->
                     <Border Grid.Column="0"
-                            Width="40"
-                            Height="40"
-                            CornerRadius="20"
-                            Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
-                            Margin="0,0,16,0"
+                            Width="36"
+                            Height="36"
+                            CornerRadius="6"
+                            Background="{ThemeResource AccentFillColorSecondaryBrush}"
+                            Margin="0,0,14,0"
                             VerticalAlignment="Center">
                         <FontIcon FontFamily="Segoe MDL2 Assets"
                                   Glyph="&#xE8A7;"
-                                  FontSize="18"
-                                  Foreground="{ThemeResource TextFillColorPrimaryBrush}"
+                                  FontSize="16"
+                                  Foreground="{ThemeResource AccentFillColorDefaultBrush}"
                                   VerticalAlignment="Center"
                                   HorizontalAlignment="Center"/>
                     </Border>
 
-                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,12,0">
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center" Margin="0,0,10,0">
                         <TextBlock Text="启用任务切换卡片窗口"
-                                   FontSize="14"
+                                   FontSize="13.5"
                                    FontWeight="SemiBold"
                                    Foreground="{ThemeResource TextFillColorPrimaryBrush}"/>
                         <TextBlock Text="触发手势时弹出三维视觉任务卡片切换界面"
-                                   FontSize="11.5"
+                                   FontSize="11"
                                    Foreground="{ThemeResource TextFillColorSecondaryBrush}"
                                    TextWrapping="Wrap"
-                                   Margin="0,3,0,0"/>
+                                   Margin="0,2,0,0"/>
                     </StackPanel>
+                    
                     <ToggleSwitch x:Name="WindowToggle"
                                   Grid.Column="2"
+                                  HorizontalAlignment="Right"
                                   VerticalAlignment="Center"
-                                  IsOn="True"/>
+                                  OnContent=""
+                                  OffContent=""
+                                  IsOn="True"
+                                  MinWidth="0"
+                                  Width="44"
+                                  Margin="0,0,4,0"/>
                 </Grid>
             </Border>
 
-            <!-- 退出应用按钮 -->
-            <Button
-                x:Name="ExitButton"
-                Content="完全退出应用程序"
-                HorizontalAlignment="Stretch"
-                Height="38"
-                Background="{ThemeResource AccentFillColorDefaultBrush}"
-                Foreground="{ThemeResource TextOnAccentFillColorPrimaryBrush}"
-                FontWeight="SemiBold"/>
+            <!-- 底部退出行 -->
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,4,0,4">
+                <TextBlock Text="Touch-Rev 在后台持续运行。"
+                           FontSize="11.5"
+                           Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                           VerticalAlignment="Center"/>
+                <Button x:Name="ExitButton"
+                        Content="完全退出应用程序"
+                        Background="Transparent"
+                        BorderBrush="Transparent"
+                        BorderThickness="0"
+                        Foreground="{ThemeResource AccentFillColorDefaultBrush}"
+                        FontSize="11.5"
+                        VerticalAlignment="Center"
+                        Margin="2,0,0,0"
+                        Padding="0"/>
+            </StackPanel>
+            
         </StackPanel>
     </ScrollViewer>
 </Grid>

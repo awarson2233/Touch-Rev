@@ -9,6 +9,7 @@
 
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Hosting.h>
+#include <winrt/Windows.UI.Xaml.Shapes.h>
 
 class ConfigWindow
 {
@@ -50,6 +51,7 @@ private:
     winrt::Windows::UI::Xaml::Controls::ToggleSwitch gestureToggle_{nullptr};
     winrt::Windows::UI::Xaml::Controls::ToggleSwitch windowToggle_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Button exitButton_{nullptr};
+    winrt::Windows::UI::Xaml::Shapes::Ellipse statusIndicatorDot_{nullptr};
 
     bool isTogglingHook_ = false;
 };

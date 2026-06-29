@@ -26,12 +26,151 @@
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
 #include <winrt/Windows.UI.Input.h>
 #include <winrt/Windows.UI.Xaml.Input.h>
+#include <winrt/Windows.UI.Xaml.Shapes.h>
 
 #include <tlhelp32.h>
+
+#include <string>
+#include <string_view>
 
 namespace
 {
 constexpr wchar_t kWindowTitle[] = L"Touch-Rev 配置";
+
+constexpr DWORD kPdbStatusNone = 0;
+constexpr DWORD kPdbStatusResolving = 1;
+constexpr DWORD kPdbStatusLoaded = 2;
+constexpr DWORD kPdbStatusDownloadFailed = 3;
+constexpr DWORD kPdbStatusIdentityMismatch = 4;
+
+constexpr DWORD kPdbSourceNone = 0;
+constexpr DWORD kPdbSourceCache = 1;
+constexpr DWORD kPdbSourceDownload = 2;
+constexpr DWORD kPdbSourceExternal = 3;
+
+constexpr DWORD kHookStatusNone = 0;
+constexpr DWORD kHookStatusInstalled = 1;
+constexpr DWORD kHookStatusSymbolResolveFailed = 2;
+constexpr DWORD kHookStatusRangeValidationFailed = 3;
+constexpr DWORD kHookStatusNoMatchingEntries = 4;
+constexpr DWORD kHookStatusWriteFailed = 5;
+
+enum class StatusVisual {
+    Gray,
+    Blue,
+    Green,
+    Yellow,
+    Red,
+};
+
+struct BlockerRuntimeStatus {
+    DWORD pdbStatus = kPdbStatusNone;
+    DWORD pdbSource = kPdbSourceNone;
+    DWORD hookStatus = kHookStatusNone;
+    DWORD pdbLastError = ERROR_SUCCESS;
+    DWORD hookLastError = ERROR_SUCCESS;
+    std::wstring pdbLastEvent;
+    std::wstring hookLastEvent;
+};
+
+winrt::Windows::UI::Color StatusColor(bool isDark, StatusVisual visual)
+{
+    switch (visual)
+    {
+    case StatusVisual::Blue:
+        return isDark ? winrt::Windows::UI::Color{255, 0x33, 0xAA, 0xFF}
+                      : winrt::Windows::UI::Color{255, 0x00, 0x78, 0xD4};
+    case StatusVisual::Green:
+        return isDark ? winrt::Windows::UI::Color{255, 0x4C, 0xE2, 0x8A}
+                      : winrt::Windows::UI::Color{255, 0x0F, 0x7B, 0x43};
+    case StatusVisual::Yellow:
+        return isDark ? winrt::Windows::UI::Color{255, 0xFF, 0xC8, 0x3C}
+                      : winrt::Windows::UI::Color{255, 0xE0, 0x80, 0x00};
+    case StatusVisual::Red:
+        return isDark ? winrt::Windows::UI::Color{255, 0xFF, 0x73, 0x73}
+                      : winrt::Windows::UI::Color{255, 0xD3, 0x2F, 0x2F};
+    case StatusVisual::Gray:
+    default:
+        return isDark ? winrt::Windows::UI::Color{255, 0xAA, 0xAA, 0xAA}
+                      : winrt::Windows::UI::Color{255, 0x66, 0x66, 0x66};
+    }
+}
+
+void SetStatusText(const winrt::Windows::UI::Xaml::Controls::TextBlock& textBlock,
+                   std::wstring_view text,
+                   bool isDark,
+                   StatusVisual visual)
+{
+    textBlock.Text(winrt::hstring{text});
+    textBlock.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(
+        StatusColor(isDark, visual)));
+}
+
+DWORD ReadRegistryDword(HKEY key, PCWSTR name, DWORD fallback)
+{
+    DWORD value = fallback;
+    DWORD type = 0;
+    DWORD size = sizeof(value);
+    if (RegQueryValueExW(key, name, nullptr, &type,
+                         reinterpret_cast<LPBYTE>(&value), &size) != ERROR_SUCCESS ||
+        type != REG_DWORD || size != sizeof(value))
+    {
+        return fallback;
+    }
+    return value;
+}
+
+std::wstring ReadRegistryString(HKEY key, PCWSTR name)
+{
+    wchar_t buffer[512]{};
+    DWORD type = 0;
+    DWORD size = sizeof(buffer);
+    if (RegQueryValueExW(key, name, nullptr, &type,
+                         reinterpret_cast<LPBYTE>(buffer), &size) != ERROR_SUCCESS ||
+        type != REG_SZ)
+    {
+        return {};
+    }
+    buffer[ARRAYSIZE(buffer) - 1] = L'\0';
+    return buffer;
+}
+
+BlockerRuntimeStatus ReadBlockerRuntimeStatus()
+{
+    BlockerRuntimeStatus status{};
+    HKEY key = nullptr;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Touch-Rev", 0,
+                      KEY_READ, &key) != ERROR_SUCCESS)
+    {
+        return status;
+    }
+
+    status.pdbStatus = ReadRegistryDword(key, L"PdbStatus", kPdbStatusNone);
+    status.pdbSource = ReadRegistryDword(key, L"PdbSource", kPdbSourceNone);
+    status.hookStatus = ReadRegistryDword(key, L"HookStatus", kHookStatusNone);
+    status.pdbLastError = ReadRegistryDword(key, L"PdbLastError", ERROR_SUCCESS);
+    status.hookLastError = ReadRegistryDword(key, L"HookLastError", ERROR_SUCCESS);
+    status.pdbLastEvent = ReadRegistryString(key, L"PdbLastEvent");
+    status.hookLastEvent = ReadRegistryString(key, L"HookLastEvent");
+    RegCloseKey(key);
+    return status;
+}
+
+std::wstring PdbSourceText(DWORD source)
+{
+    switch (source)
+    {
+    case kPdbSourceCache:
+        return L"本地缓存";
+    case kPdbSourceDownload:
+        return L"本次下载";
+    case kPdbSourceExternal:
+        return L"外部符号路径";
+    case kPdbSourceNone:
+    default:
+        return L"未知来源";
+    }
+}
 
 bool AppendThemeResources(winrt::Windows::UI::Xaml::ResourceDictionary const& resources)
 {
@@ -77,10 +216,10 @@ bool ConfigWindow::Initialize(HINSTANCE instance, int showCommand)
     // 如果未注册则进行注册
     RegisterClassExW(&windowClass);
 
-    // 获取系统 DPI 并缩放 560x680 的精致窗口
+    // 获取系统 DPI 并缩放 460x490 的精致窗口
     const UINT dpi = GetDpiForSystem();
-    const int clientWidth = MulDiv(560, dpi, 96);
-    const int clientHeight = MulDiv(680, dpi, 96);
+    const int clientWidth = MulDiv(460, dpi, 96);
+    const int clientHeight = MulDiv(490, dpi, 96);
 
     // 使用标准的 Win32 窗口样式，但禁用最大化按钮（我们限死了窗口大小）
     constexpr DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX;
@@ -181,8 +320,8 @@ LRESULT ConfigWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         {
             auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
             const UINT dpi = GetDpiForWindow(hwnd_);
-            const int clientWidth = MulDiv(560, dpi, 96);
-            const int clientHeight = MulDiv(680, dpi, 96);
+            const int clientWidth = MulDiv(460, dpi, 96);
+            const int clientHeight = MulDiv(490, dpi, 96);
 
             RECT rect = { 0, 0, clientWidth, clientHeight };
             AdjustWindowRectExForDpi(&rect, GetWindowLongW(hwnd_, GWL_STYLE), FALSE, GetWindowLongW(hwnd_, GWL_EXSTYLE), dpi);
@@ -336,8 +475,7 @@ HRESULT ConfigWindow::OnCreate()
 
         // 检索 XAML 中的配置控件与状态栏
         hookStatusText_ = root.FindName(L"HookStatusText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
-
-
+        statusIndicatorDot_ = root.FindName(L"StatusIndicatorDot").as<winrt::Windows::UI::Xaml::Shapes::Ellipse>();
 
         // 检索 XAML 中的配置控件
         hookToggle_ = root.FindName(L"HookToggle").as<winrt::Windows::UI::Xaml::Controls::ToggleSwitch>();
@@ -416,6 +554,7 @@ void ConfigWindow::OnDestroy()
     
     // 清理 XAML 引用
     hookStatusText_ = nullptr;
+    statusIndicatorDot_ = nullptr;
     hookToggle_ = nullptr;
     gestureToggle_ = nullptr;
     windowToggle_ = nullptr;
@@ -456,62 +595,88 @@ void ConfigWindow::SyncConfigToUi()
     if (hookStatusText_)
     {
         const bool isDark = (themeManager_.Mode() == AppThemeMode::Dark);
+        StatusVisual visual = StatusVisual::Gray;
         if (hookLoaded)
         {
-            DWORD pdbStatus = 0;
-            DWORD hookStatus = 0;
-            HKEY key = nullptr;
-            if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Touch-Rev", 0, KEY_READ, &key) == ERROR_SUCCESS)
+            const BlockerRuntimeStatus status = ReadBlockerRuntimeStatus();
+            if (status.pdbStatus == kPdbStatusDownloadFailed)
             {
-                DWORD size = sizeof(pdbStatus);
-                RegQueryValueExW(key, L"PdbStatus", nullptr, nullptr, reinterpret_cast<LPBYTE>(&pdbStatus), &size);
-                size = sizeof(hookStatus);
-                RegQueryValueExW(key, L"HookStatus", nullptr, nullptr, reinterpret_cast<LPBYTE>(&hookStatus), &size);
-                RegCloseKey(key);
+                visual = StatusVisual::Red;
+                SetStatusText(hookStatusText_, L"运行状态：无法下载 PDB 符号，拦截已失效", isDark, visual);
             }
-
-            if (pdbStatus == 1)
+            else if (status.pdbStatus == kPdbStatusIdentityMismatch)
             {
-                hookStatusText_.Text(L"运行状态：PDB 符号下载中，正在拦截...");
-                auto yellowColor = isDark ? winrt::Windows::UI::Color{255, 0xFF, 0xC8, 0x3C} : winrt::Windows::UI::Color{255, 0xE0, 0x80, 0x00};
-                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(yellowColor));
+                visual = StatusVisual::Yellow;
+                SetStatusText(hookStatusText_, L"运行状态：PDB identity 不匹配或缓存损坏，等待重新下载", isDark, visual);
             }
-            else if (pdbStatus == 3)
+            else if (status.pdbStatus == kPdbStatusResolving)
             {
-                hookStatusText_.Text(L"运行状态：无法下载 PDB 符号 (网络错误)，拦截已失效！");
-                auto redColor = isDark ? winrt::Windows::UI::Color{255, 0xFF, 0x73, 0x73} : winrt::Windows::UI::Color{255, 0xD3, 0x2F, 0x2F};
-                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(redColor));
+                if (status.pdbSource == kPdbSourceCache)
+                {
+                    visual = StatusVisual::Yellow;
+                    SetStatusText(hookStatusText_, L"运行状态：正在加载本地 PDB 缓存...", isDark, visual);
+                }
+                else if (status.pdbSource == kPdbSourceDownload)
+                {
+                    visual = StatusVisual::Yellow;
+                    SetStatusText(hookStatusText_, L"运行状态：PDB 符号下载中...", isDark, visual);
+                }
+                else
+                {
+                    visual = StatusVisual::Blue;
+                    SetStatusText(hookStatusText_, L"运行状态：正在解析 PDB 符号...", isDark, visual);
+                }
             }
-            else if (pdbStatus == 4)
+            else if (status.hookStatus == kHookStatusSymbolResolveFailed)
             {
-                hookStatusText_.Text(L"运行状态：本地 PDB 缓存已过期/损坏，正在重新下载...");
-                auto yellowColor = isDark ? winrt::Windows::UI::Color{255, 0xFF, 0xC8, 0x3C} : winrt::Windows::UI::Color{255, 0xE0, 0x80, 0x00};
-                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(yellowColor));
+                visual = StatusVisual::Red;
+                SetStatusText(hookStatusText_, L"运行状态：PDB 已加载，但手势表 data symbol 未解析", isDark, visual);
             }
-            else if (hookStatus == 2)
+            else if (status.hookStatus == kHookStatusRangeValidationFailed)
             {
-                hookStatusText_.Text(L"运行状态：Hook 符号补丁配置失效，拦截已失效！");
-                auto redColor = isDark ? winrt::Windows::UI::Color{255, 0xFF, 0x73, 0x73} : winrt::Windows::UI::Color{255, 0xD3, 0x2F, 0x2F};
-                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(redColor));
+                visual = StatusVisual::Red;
+                SetStatusText(hookStatusText_, L"运行状态：PDB 已加载，但手势表区间校验失败", isDark, visual);
             }
-            else if (hookStatus == 1 || pdbStatus == 2)
+            else if (status.hookStatus == kHookStatusNoMatchingEntries)
             {
-                hookStatusText_.Text(L"运行状态：已拦截 Windows 默认手势 (运行中)");
-                auto greenColor = isDark ? winrt::Windows::UI::Color{255, 0x4C, 0xE2, 0x8A} : winrt::Windows::UI::Color{255, 0x0F, 0x7B, 0x43};
-                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(greenColor));
+                visual = StatusVisual::Red;
+                SetStatusText(hookStatusText_, L"运行状态：PDB 已加载，但未找到可屏蔽的三指表项", isDark, visual);
+            }
+            else if (status.hookStatus == kHookStatusWriteFailed)
+            {
+                visual = StatusVisual::Red;
+                SetStatusText(hookStatusText_, L"运行状态：手势表 patch 写入失败，拦截已失效", isDark, visual);
+            }
+            else if (status.hookStatus == kHookStatusInstalled)
+            {
+                visual = StatusVisual::Green;
+                std::wstring text = L"运行状态：已拦截 Windows 默认手势 (PDB: " +
+                                    PdbSourceText(status.pdbSource) + L")";
+                SetStatusText(hookStatusText_, text, isDark, visual);
+            }
+            else if (status.pdbStatus == kPdbStatusLoaded)
+            {
+                visual = StatusVisual::Blue;
+                std::wstring text = L"运行状态：PDB 已加载 (" +
+                                    PdbSourceText(status.pdbSource) + L")，Hook 初始化中...";
+                SetStatusText(hookStatusText_, text, isDark, visual);
             }
             else
             {
-                hookStatusText_.Text(L"运行状态：已注入拦截模块，正在初始化...");
-                auto blueColor = isDark ? winrt::Windows::UI::Color{255, 0x33, 0xAA, 0xFF} : winrt::Windows::UI::Color{255, 0x00, 0x78, 0xD4};
-                hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(blueColor));
+                visual = StatusVisual::Blue;
+                SetStatusText(hookStatusText_, L"运行状态：已注入拦截模块，正在初始化...", isDark, visual);
             }
         }
         else
         {
-            hookStatusText_.Text(L"运行状态：未拦截 (未注入)");
-            auto grayColor = isDark ? winrt::Windows::UI::Color{255, 0xAA, 0xAA, 0xAA} : winrt::Windows::UI::Color{255, 0x66, 0x66, 0x66};
-            hookStatusText_.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(grayColor));
+            visual = StatusVisual::Gray;
+            SetStatusText(hookStatusText_, L"运行状态：未拦截 (未注入)", isDark, visual);
+        }
+
+        if (statusIndicatorDot_)
+        {
+            statusIndicatorDot_.Fill(winrt::Windows::UI::Xaml::Media::SolidColorBrush(
+                StatusColor(isDark, visual)));
         }
     }
 

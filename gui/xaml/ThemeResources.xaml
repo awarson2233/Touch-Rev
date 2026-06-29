@@ -10,9 +10,9 @@
             <Color x:Key="AcrylicFallbackColor">#FF2C2C2C</Color>
             <x:Double x:Key="AcrylicBlurAmount">30</x:Double>
             <x:Double x:Key="AcrylicNoiseOpacity">0.02</x:Double>
-            <x:Double x:Key="AcrylicTintOpacity">0.15</x:Double>
+            <x:Double x:Key="AcrylicTintOpacity">0.12</x:Double>
             <x:Double x:Key="AcrylicInactiveTintOpacity">0.00</x:Double>
-            <x:Double x:Key="AcrylicLuminosityOpacity">0.12</x:Double>
+            <x:Double x:Key="AcrylicLuminosityOpacity">0.03</x:Double>
             <x:Double x:Key="AcrylicSaturation">1.40</x:Double>
 
             <!-- 官方标准 UI 主题色彩键值（Dark） -->
