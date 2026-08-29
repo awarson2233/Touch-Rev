@@ -45,6 +45,7 @@ add_library(TouchRevBlockerHook SHARED
     hookdll/dbghelp_symbol_provider.cpp
     hookdll/dllmain.cpp
     hookdll/direct_hook_resolver.cpp
+    hookdll/hook_runtime.cpp
     hookdll/twinui_gesture_table_patch.cpp
 )
 target_link_libraries(TouchRevBlockerHook PRIVATE touchrev_blocker_common user32 dbghelp winhttp)
@@ -59,4 +60,3 @@ set_target_properties(TouchRevBlockerHook PROPERTIES
 
 target_compile_features(touchrev_blocker_common PRIVATE cxx_std_20)
 target_compile_features(TouchRevBlockerHook PRIVATE cxx_std_20)
-

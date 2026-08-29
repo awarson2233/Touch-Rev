@@ -763,7 +763,13 @@ void ConfigWindow::ToggleHook(bool enable)
         // 安装 Hook
         if (moduleInfo.module)
         {
-            // 已加载，无需重复注入
+            // DLL 已加载时仍显式发送 Start，以支持幂等启动和协议恢复。
+            if (!touchrev::StartHookInProcess(target.pid, fullDllPath,
+                                              moduleInfo.module, &error))
+            {
+                MessageBoxW(hwnd_, (L"启动 Hook DLL 失败:\n" + error).c_str(),
+                            L"Touch-Rev 启动失败", MB_OK | MB_ICONERROR);
+            }
             isTogglingHook_ = false;
             return;
         }

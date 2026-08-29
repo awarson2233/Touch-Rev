@@ -6,9 +6,73 @@
 #include <tlhelp32.h>
 
 #include <cstdint>
+#include <new>
 
 namespace touchrev {
 namespace {
+
+constexpr char kHookStartExport[] = "TouchRevHookStart";
+constexpr char kHookStopExport[] = "TouchRevHookStop";
+constexpr DWORD kLoadLibraryTimeoutMs = 30000;
+constexpr DWORD kHookControlTimeoutMs = 30000;
+
+struct RemoteThreadWaitResult {
+    bool threadFinished = false;
+    bool resultAvailable = false;
+    DWORD exitCode = 0;
+};
+
+struct DeferredRemoteFreeContext {
+    HANDLE process = nullptr;
+    HANDLE remoteThread = nullptr;
+    LPVOID remoteAddress = nullptr;
+    DWORD pid = 0;
+};
+
+DWORD WINAPI DeferredRemoteFreeThread(LPVOID parameter) {
+    auto* context = static_cast<DeferredRemoteFreeContext*>(parameter);
+    if (!context) {
+        return ERROR_INVALID_PARAMETER;
+    }
+
+    const DWORD wait = WaitForSingleObject(context->remoteThread, INFINITE);
+    if (wait == WAIT_OBJECT_0 && context->remoteAddress) {
+        VirtualFreeEx(context->process, context->remoteAddress, 0, MEM_RELEASE);
+    }
+
+    if (context->remoteThread) {
+        CloseHandle(context->remoteThread);
+    }
+    if (context->process) {
+        CloseHandle(context->process);
+    }
+    delete context;
+    return wait == WAIT_OBJECT_0 ? ERROR_SUCCESS : ERROR_GEN_FAILURE;
+}
+
+bool ScheduleDeferredRemoteFree(HANDLE process,
+                                HANDLE remoteThread,
+                                LPVOID remoteAddress,
+                                DWORD pid) {
+    auto* context = new (std::nothrow) DeferredRemoteFreeContext{
+        process, remoteThread, remoteAddress, pid};
+    if (!context) {
+        return false;
+    }
+
+    HANDLE cleanupThread = CreateThread(
+        nullptr, 0, DeferredRemoteFreeThread, context, 0, nullptr);
+    if (!cleanupThread) {
+        delete context;
+        return false;
+    }
+
+    CloseHandle(cleanupThread);
+    LogMessage(L"injector", LogLevel::Warning,
+               L"event=REMOTE_PATH_DEFERRED_FREE_SCHEDULED pid=%lu address=0x%p",
+               pid, remoteAddress);
+    return true;
+}
 
 RemoteModuleInfo EmptyRemoteModuleInfo() {
     return {};
@@ -152,31 +216,149 @@ uintptr_t ResolveRemoteKernel32Export(DWORD pid,
     return remoteKernel32 + offset;
 }
 
-bool WaitForRemoteThread(HANDLE thread,
-                         PCWSTR apiName,
-                         DWORD* exitCode,
-                         std::wstring* error) {
-    DWORD wait = WaitForSingleObject(thread, 30000);
+RemoteThreadWaitResult WaitForRemoteThread(HANDLE thread,
+                                           PCWSTR apiName,
+                                           DWORD timeoutMs,
+                                           std::wstring* error) {
+    RemoteThreadWaitResult result{};
+    const DWORD wait = WaitForSingleObject(thread, timeoutMs);
+    if (wait == WAIT_TIMEOUT) {
+        if (error) {
+            *error = std::wstring(apiName ? apiName : L"remote thread") +
+                     L" thread did not finish before timeout; the remote operation may still be running";
+        }
+        return result;
+    }
     if (wait != WAIT_OBJECT_0) {
         if (error) {
             *error = std::wstring(apiName ? apiName : L"remote thread") +
-                     L" thread did not finish in 30s";
+                     L" wait failed: " + FormatLastError(GetLastError());
         }
-        return false;
+        return result;
     }
 
+    result.threadFinished = true;
     DWORD threadExitCode = 0;
     if (!GetExitCodeThread(thread, &threadExitCode)) {
         if (error) {
             *error = L"GetExitCodeThread failed: " + FormatLastError(GetLastError());
         }
+        return result;
+    }
+
+    result.resultAvailable = true;
+    result.exitCode = threadExitCode;
+    return result;
+}
+
+uintptr_t ResolveRemoteDllExport(HMODULE remoteModule,
+                                 const std::wstring& dllPath,
+                                 const char* exportName,
+                                 std::wstring* error) {
+    if (!remoteModule || dllPath.empty() || !exportName) {
+        if (error) {
+            *error = L"invalid remote DLL export resolve arguments";
+        }
+        return 0;
+    }
+
+    HMODULE localModule = LoadLibraryExW(
+        dllPath.c_str(), nullptr, DONT_RESOLVE_DLL_REFERENCES);
+    if (!localModule) {
+        if (error) {
+            *error = L"LoadLibraryExW(DONT_RESOLVE_DLL_REFERENCES) failed: " +
+                     FormatLastError(GetLastError());
+        }
+        return 0;
+    }
+
+    FARPROC localExport = GetProcAddress(localModule, exportName);
+    if (!localExport) {
+        if (error) {
+            *error = L"GetProcAddress failed for hook control export: " +
+                     FormatLastError(GetLastError());
+        }
+        FreeLibrary(localModule);
+        return 0;
+    }
+
+    const uintptr_t exportRva = reinterpret_cast<uintptr_t>(localExport) -
+                                reinterpret_cast<uintptr_t>(localModule);
+    FreeLibrary(localModule);
+    return reinterpret_cast<uintptr_t>(remoteModule) + exportRva;
+}
+
+bool CallRemoteRoutine(HANDLE process,
+                       uintptr_t routine,
+                       PCWSTR operationName,
+                       DWORD timeoutMs,
+                       DWORD* exitCode,
+                       std::wstring* error) {
+    if (exitCode) {
+        *exitCode = 0;
+    }
+    if (!process || routine == 0) {
+        if (error) {
+            *error = L"invalid remote routine call arguments";
+        }
+        return false;
+    }
+
+    HANDLE thread = CreateRemoteThread(
+        process, nullptr, 0,
+        reinterpret_cast<LPTHREAD_START_ROUTINE>(routine), nullptr, 0, nullptr);
+    if (!thread) {
+        if (error) {
+            *error = std::wstring(L"CreateRemoteThread(") +
+                     (operationName ? operationName : L"hook control") +
+                     L") failed: " + FormatLastError(GetLastError());
+        }
+        return false;
+    }
+
+    const RemoteThreadWaitResult wait =
+        WaitForRemoteThread(thread, operationName, timeoutMs, error);
+    CloseHandle(thread);
+    if (!wait.resultAvailable) {
         return false;
     }
 
     if (exitCode) {
-        *exitCode = threadExitCode;
+        *exitCode = wait.exitCode;
+    }
+    if (wait.exitCode != ERROR_SUCCESS) {
+        if (error) {
+            *error = std::wstring(operationName ? operationName : L"hook control") +
+                     L" returned error " + std::to_wstring(wait.exitCode) +
+                     L": " + FormatLastError(wait.exitCode);
+        }
+        return false;
+    }
+    return true;
+}
+
+bool StartHookWithProcess(HANDLE process,
+                          const std::wstring& dllPath,
+                          HMODULE remoteModule,
+                          std::wstring* error) {
+    const uintptr_t remoteStart = ResolveRemoteDllExport(
+        remoteModule, dllPath, kHookStartExport, error);
+    if (!remoteStart) {
+        return false;
     }
 
+    LogMessage(L"injector", LogLevel::Info,
+               L"event=HOOK_START_BEGIN module=0x%p remoteStart=0x%p",
+               remoteModule, reinterpret_cast<void*>(remoteStart));
+    DWORD startResult = 0;
+    if (!CallRemoteRoutine(process, remoteStart, L"TouchRevHookStart",
+                           kHookControlTimeoutMs, &startResult, error)) {
+        return false;
+    }
+
+    LogMessage(L"injector", LogLevel::Info,
+               L"event=HOOK_START_ACCEPTED module=0x%p result=%lu",
+               remoteModule, startResult);
     return true;
 }
 
@@ -194,6 +376,34 @@ bool QueryRemoteDllModule(DWORD pid,
     }
 
     return FindRemoteModule(pid, dllPath, moduleInfo, error);
+}
+
+bool StartHookInProcess(DWORD pid,
+                        const std::wstring& dllPath,
+                        HMODULE remoteModule,
+                        std::wstring* error) {
+    if (!remoteModule || dllPath.empty()) {
+        if (error) {
+            *error = L"hook module or DLL path is empty";
+        }
+        return false;
+    }
+
+    HANDLE process = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
+                                     PROCESS_VM_OPERATION | PROCESS_VM_WRITE |
+                                     PROCESS_VM_READ,
+                                 FALSE, pid);
+    if (!process) {
+        if (error) {
+            *error = L"OpenProcess for hook start failed: " +
+                     FormatLastError(GetLastError());
+        }
+        return false;
+    }
+
+    const bool started = StartHookWithProcess(process, dllPath, remoteModule, error);
+    CloseHandle(process);
+    return started;
 }
 
 bool InjectDllIntoProcess(DWORD pid,
@@ -275,17 +485,39 @@ bool InjectDllIntoProcess(DWORD pid,
         return false;
     }
 
-    DWORD exitCode = 0;
-    bool threadOk = WaitForRemoteThread(thread, L"remote LoadLibraryW", &exitCode,
-                                        error);
-    CloseHandle(thread);
+    const RemoteThreadWaitResult loadWait = WaitForRemoteThread(
+        thread, L"remote LoadLibraryW", kLoadLibraryTimeoutMs, error);
 
-    VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
+    if (loadWait.threadFinished) {
+        VirtualFreeEx(process, remotePath, 0, MEM_RELEASE);
+        CloseHandle(thread);
+    } else {
+        if (ScheduleDeferredRemoteFree(process, thread, remotePath, pid)) {
+            process = nullptr;
+            thread = nullptr;
+            remotePath = nullptr;
+            if (error) {
+                *error += L"; the remote DLL path will be released after the remote thread actually finishes";
+            }
+        } else {
+            CloseHandle(thread);
+            LogMessage(L"injector", LogLevel::Warning,
+                       L"event=REMOTE_PATH_RETAINED pid=%lu address=0x%p bytes=%zu reason=deferred-cleanup-thread-create-failed",
+                       pid, remotePath, bytes);
+            if (error) {
+                *error += L"; the remote DLL path allocation was retained because safe deferred cleanup could not be scheduled";
+            }
+        }
+    }
 
-    if (!threadOk) {
-        CloseHandle(process);
+    if (!loadWait.resultAvailable) {
+        if (process) {
+            CloseHandle(process);
+        }
         return false;
     }
+
+    const DWORD exitCode = loadWait.exitCode;
 
     RemoteModuleInfo moduleInfo;
     if (!FindRemoteModule(pid, dllPath, &moduleInfo, error) || !moduleInfo.module) {
@@ -300,6 +532,11 @@ bool InjectDllIntoProcess(DWORD pid,
 
     if (remoteModule) {
         *remoteModule = moduleInfo.module;
+    }
+
+    if (!StartHookWithProcess(process, dllPath, moduleInfo.module, error)) {
+        CloseHandle(process);
+        return false;
     }
 
     LogMessage(L"injector", LogLevel::Info,
@@ -337,7 +574,8 @@ bool UninstallDllFromProcess(DWORD pid,
     }
 
     HANDLE process = OpenProcess(PROCESS_CREATE_THREAD | PROCESS_QUERY_INFORMATION |
-                                     PROCESS_VM_OPERATION | PROCESS_VM_READ,
+                                     PROCESS_VM_OPERATION | PROCESS_VM_WRITE |
+                                     PROCESS_VM_READ,
                                  FALSE, pid);
     if (!process) {
         if (error) {
@@ -346,6 +584,27 @@ bool UninstallDllFromProcess(DWORD pid,
         }
         return false;
     }
+
+    const uintptr_t remoteStop = ResolveRemoteDllExport(
+        moduleInfo.module, dllPath, kHookStopExport, error);
+    if (!remoteStop) {
+        CloseHandle(process);
+        return false;
+    }
+
+    LogMessage(L"injector", LogLevel::Info,
+               L"event=HOOK_STOP_BEGIN pid=%lu module=0x%p remoteStop=0x%p",
+               pid, moduleInfo.module, reinterpret_cast<void*>(remoteStop));
+    DWORD stopResult = 0;
+    if (!CallRemoteRoutine(process, remoteStop, L"TouchRevHookStop",
+                           kHookControlTimeoutMs, &stopResult, error)) {
+        CloseHandle(process);
+        return false;
+    }
+
+    LogMessage(L"injector", LogLevel::Info,
+               L"event=HOOK_STOP_DONE pid=%lu module=0x%p result=%lu",
+               pid, moduleInfo.module, stopResult);
 
     std::wstring resolveError;
     uintptr_t remoteFreeLibrary = ResolveRemoteKernel32Export(pid, "FreeLibrary",
@@ -377,15 +636,16 @@ bool UninstallDllFromProcess(DWORD pid,
         return false;
     }
 
-    DWORD exitCode = 0;
-    bool threadOk = WaitForRemoteThread(thread, L"remote FreeLibrary", &exitCode,
-                                        error);
+    const RemoteThreadWaitResult freeWait = WaitForRemoteThread(
+        thread, L"remote FreeLibrary", kLoadLibraryTimeoutMs, error);
     CloseHandle(thread);
     CloseHandle(process);
 
-    if (!threadOk) {
+    if (!freeWait.resultAvailable) {
         return false;
     }
+
+    const DWORD exitCode = freeWait.exitCode;
 
     if (freeLibraryResult) {
         *freeLibraryResult = exitCode;

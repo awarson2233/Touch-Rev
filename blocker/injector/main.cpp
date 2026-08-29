@@ -238,12 +238,16 @@ int wmain(int argc, wchar_t** argv) {
 
     case Command::Install: {
         if (moduleInfo.module) {
-            std::wcout << L"Already loaded; install skipped.\n";
+            if (!touchrev::StartHookInProcess(target.pid, fullDllPath,
+                                              moduleInfo.module, &error)) {
+                return Fail(error);
+            }
+            std::wcout << L"Already loaded; start command accepted.\n";
             PrintModuleStatus(moduleInfo);
             touchrev::LogMessage(L"injector", touchrev::LogLevel::Info,
-                                 L"event=INSTALL_SKIPPED reason=already-loaded "
-                                 L"module=0x%p modulePath=%s",
-                                 moduleInfo.module, moduleInfo.modulePath.c_str());
+                                  L"event=START_EXISTING_MODULE "
+                                  L"module=0x%p modulePath=%s",
+                                  moduleInfo.module, moduleInfo.modulePath.c_str());
             break;
         }
 

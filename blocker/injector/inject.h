@@ -23,6 +23,11 @@ bool InjectDllIntoProcess(DWORD pid,
                           HMODULE* remoteModule,
                           std::wstring* error);
 
+bool StartHookInProcess(DWORD pid,
+                        const std::wstring& dllPath,
+                        HMODULE remoteModule,
+                        std::wstring* error);
+
 bool UninstallDllFromProcess(DWORD pid,
                              const std::wstring& dllPath,
                              RemoteModuleInfo* unloadedModule,
