@@ -50,8 +50,7 @@ UINT RawTouchInput::ReportLengthOr(UINT reportLength, const DeviceContext& conte
 bool RawTouchInput::Initialize(HWND hwnd)
 {
     RAWINPUTDEVICE devices[] = {
-        {kUsagePageDigitizer, kUsageTouchScreen, RIDEV_INPUTSINK | RIDEV_DEVNOTIFY, hwnd},
-        {kUsagePageDigitizer, kUsageTouchPad, RIDEV_INPUTSINK | RIDEV_DEVNOTIFY, hwnd},
+        {kUsagePageDigitizer, kUsageTouchScreen, RIDEV_INPUTSINK | RIDEV_DEVNOTIFY, hwnd}
     };
 
     if (!RegisterRawInputDevices(devices, static_cast<UINT>(std::size(devices)), sizeof(RAWINPUTDEVICE)))

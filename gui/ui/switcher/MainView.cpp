@@ -356,6 +356,15 @@ void MainView::AttachPointerHandlers()
 
 void MainView::ApplyTheme(AppThemeMode mode, bool active)
 {
+    const bool themeChanged = (themeMode_ != mode);
+    const bool activeChanged = (isWindowActive_ != active);
+    const bool brushExists = (containerAcrylicVisual_ && containerAcrylicVisual_.Brush());
+
+    if (!themeChanged && !activeChanged && brushExists)
+    {
+        return;
+    }
+
     themeMode_ = mode;
     isWindowActive_ = active;
 

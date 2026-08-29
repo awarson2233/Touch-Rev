@@ -186,7 +186,17 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     case WM_ACTIVATE:
     {
         const WORD state = LOWORD(wParam);
-        ApplyActivationVisualState(state != WA_INACTIVE);
+        if (state == WA_INACTIVE)
+        {
+            if (isVisible_ && !isSyncingLayout_)
+            {
+                Hide();
+            }
+        }
+        else
+        {
+            ApplyActivationVisualState(true);
+        }
         break;
     }
 
@@ -518,7 +528,7 @@ void MainWindow::RefreshTheme()
 
 void MainWindow::ApplyActivationVisualState(bool active)
 {
-    activationSucceeded_ = active && GetForegroundWindow() == hwnd_;
+    activationSucceeded_ = active;
     keyboardNavigationEnabled_ = activationSucceeded_;
     appSwitcherMainView_.ApplyTheme(themeManager_.Mode(), activationSucceeded_);
 }
@@ -626,8 +636,8 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
 
     SyncClientLayout(width, height, true);
 
-    activationSucceeded_ = false;
-    keyboardNavigationEnabled_ = false;
+    activationSucceeded_ = true;
+    keyboardNavigationEnabled_ = true;
 
     SetWindowPos(
         hwnd_,
@@ -641,14 +651,16 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
     RefreshTheme();
     appSwitcherMainView_.ApplyTheme(themeManager_.Mode(), true);
 
-    // 先 Uncloak 使窗口对 DWM 可见，再 ShowWindow(SW_SHOW) 同时请求激活
-    // 这样在显示的瞬间即建立激活上下文，避免事后争前台权限失败
+    // 确保首帧完成绘制
+    UpdateWindow(hwnd_);
+
+    // 解除 DWM 遮蔽并显示
     touchrev::common::dwm::SetWindowCloaked(hwnd_, false);
     ShowWindow(hwnd_, SW_SHOW);
     isVisible_ = true;
 
     const ActivationResult activation = TryActivateSwitcher();
-    ApplyActivationVisualState(activation.foreground);
+    ApplyActivationVisualState(activation.foreground || activation.directSucceeded);
 
     isSyncingLayout_ = false;
 }
