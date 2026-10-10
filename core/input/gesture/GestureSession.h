@@ -6,6 +6,7 @@
 
 namespace touchrev::gesture
 {
+// 距离类阈值的单位为 0.1mm（见 GestureContact 的坐标换算）。
 struct GestureSessionConfig
 {
     double stabilizationWindowMs = 70.0;

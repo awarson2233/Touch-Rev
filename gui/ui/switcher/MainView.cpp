@@ -684,6 +684,23 @@ void MainView::RenderSample(UINT widthPx, UINT heightPx, double scale)
     ApplyLayout(windows, widthPx, heightPx, scale);
 }
 
+void MainView::EnsureLayoutCommitted()
+{
+    if (!root_)
+    {
+        return;
+    }
+
+    try
+    {
+        root_.UpdateLayout();
+    }
+    catch (const winrt::hresult_error& error)
+    {
+        DebugLogHResult(L"MainView::EnsureLayoutCommitted", error.code());
+    }
+}
+
 bool MainView::LoadRoot()
 {
     try
@@ -1052,7 +1069,14 @@ void MainView::ApplyLayout(
 
     const double safeScale = std::max(0.01, scale);
     currentDpiScale_ = safeScale;
-    RECT workArea{0, 0, static_cast<LONG>(std::max(1u, widthPx)), static_cast<LONG>(std::max(1u, heightPx))};
+    // 扣除任务栏占用的边，只在工作区内排版；每边内缩最多四分之一客户区，防御异常的工作区数据。
+    const LONG clientWidthPx = static_cast<LONG>(std::max(1u, widthPx));
+    const LONG clientHeightPx = static_cast<LONG>(std::max(1u, heightPx));
+    const LONG insetLeft = std::clamp<LONG>(workAreaInsetsPx_.left, 0, clientWidthPx / 4);
+    const LONG insetRight = std::clamp<LONG>(workAreaInsetsPx_.right, 0, clientWidthPx / 4);
+    const LONG insetTop = std::clamp<LONG>(workAreaInsetsPx_.top, 0, clientHeightPx / 4);
+    const LONG insetBottom = std::clamp<LONG>(workAreaInsetsPx_.bottom, 0, clientHeightPx / 4);
+    RECT workArea{insetLeft, insetTop, clientWidthPx - insetRight, clientHeightPx - insetBottom};
     const LayoutResult layout = LayoutEngine::Calculate(
         windows,
         workArea,
@@ -1066,9 +1090,20 @@ void MainView::ApplyLayout(
     contentBoundsDip_ = {
         static_cast<float>(static_cast<double>(layout.totalSizePx.cx) / safeScale),
         static_cast<float>(static_cast<double>(layout.totalSizePx.cy) / safeScale)};
+    const double workLeftDip = static_cast<double>(workArea.left) / safeScale;
+    const double workTopDip = static_cast<double>(workArea.top) / safeScale;
+    const double workWidthDip = static_cast<double>(workArea.right - workArea.left) / safeScale;
+    const double workHeightDip = static_cast<double>(workArea.bottom - workArea.top) / safeScale;
     contentOriginDip_ = {
-        static_cast<float>(std::max(0.0, (static_cast<double>(clientSizeDip_.width) - contentBoundsDip_.width) * 0.5)),
-        static_cast<float>(std::max(0.0, (static_cast<double>(clientSizeDip_.height) - contentBoundsDip_.height) * 0.5))};
+        static_cast<float>(workLeftDip + std::max(0.0, (workWidthDip - contentBoundsDip_.width) * 0.5)),
+        static_cast<float>(workTopDip + std::max(0.0, (workHeightDip - contentBoundsDip_.height) * 0.5))};
+    if (emptyGrid_)
+    {
+        emptyGrid_.Margin({static_cast<double>(insetLeft) / safeScale,
+                           static_cast<double>(insetTop) / safeScale,
+                           static_cast<double>(insetRight) / safeScale,
+                           static_cast<double>(insetBottom) / safeScale});
+    }
     if (activeDragItemIndex_ >= windows.size())
     {
         xamlPointerDragging_ = false;

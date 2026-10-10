@@ -7,49 +7,79 @@
 
 namespace
 {
-struct SizeDouble
+// 缩略图高度上限占工作区短边的比例：单卡 28%，随数量平滑衰减到 12%（幂律有理衰减）。
+double SampleThumbnailScale(size_t count)
 {
-    double width = 0.0;
-    double height = 0.0;
-};
-
-// 连续尺寸衰减曲线采样：基于幂律有理衰减模型
-double SampleBaseScale(size_t count, bool isPortrait)
-{
-    if (count == 0)
+    constexpr double kSMax = 0.28;
+    constexpr double kSMin = 0.12;
+    constexpr double kAlpha = 0.45;
+    constexpr double kGamma = 0.85;
+    if (count <= 1)
     {
-        return 0.16;
+        return kSMax;
     }
-
     const double n = static_cast<double>(count);
-    if (!isPortrait)
+    return kSMin + (kSMax - kSMin) / (1.0 + kAlpha * std::pow(n - 1.0, kGamma));
+}
+
+// 按顺序把卡片切成 rowCount 行，使"最宽的一行"尽量窄（宽度以缩略图高度为单位：Σ宽高比 + 间距）。
+// 多个划分同样均衡时，让后面的行多放卡片，避免卡片都挤在第一行。
+std::vector<size_t> PartitionRows(const std::vector<double>& aspects, size_t rowCount, double gapUnits)
+{
+    const size_t count = aspects.size();
+    std::vector<double> prefix(count + 1, 0.0);
+    for (size_t i = 0; i < count; ++i)
     {
-        // 横屏参数：单卡最大占屏幕高度 32%，随数量平滑衰减至 13%
-        constexpr double kSMax = 0.32;
-        constexpr double kSMin = 0.13;
-        constexpr double kAlpha = 0.38;
-        constexpr double kGamma = 0.85;
-        return kSMin + (kSMax - kSMin) / (1.0 + kAlpha * std::pow(n - 1.0, kGamma));
+        prefix[i + 1] = prefix[i] + aspects[i];
     }
-    else
+
+    const auto rowWidth = [&](size_t begin, size_t end) {
+        return prefix[end] - prefix[begin] + gapUnits * static_cast<double>(end - begin - 1);
+    };
+
+    constexpr double kInf = std::numeric_limits<double>::max();
+    constexpr double kEpsilon = 1e-9;
+    // cost[j][i]：前 i 张卡分成 j 行时最宽一行的宽度；split[j][i] 记录最后一行的起点。
+    std::vector<std::vector<double>> cost(rowCount + 1, std::vector<double>(count + 1, kInf));
+    std::vector<std::vector<size_t>> split(rowCount + 1, std::vector<size_t>(count + 1, 0));
+    cost[0][0] = 0.0;
+
+    for (size_t j = 1; j <= rowCount; ++j)
     {
-        // 竖屏参数：单卡最大占屏幕宽度 44%，随数量平滑衰减至 16%
-        constexpr double kSMax = 0.44;
-        constexpr double kSMin = 0.16;
-        constexpr double kAlpha = 0.40;
-        constexpr double kGamma = 0.80;
-        return kSMin + (kSMax - kSMin) / (1.0 + kAlpha * std::pow(n - 1.0, kGamma));
+        for (size_t i = j; i <= count; ++i)
+        {
+            // k 从小到大遍历、只在严格更优时替换：平局时保留更小的 k，即最后一行更长。
+            for (size_t k = j - 1; k < i; ++k)
+            {
+                if (cost[j - 1][k] == kInf)
+                {
+                    continue;
+                }
+                const double candidate = std::max(cost[j - 1][k], rowWidth(k, i));
+                if (candidate < cost[j][i] - kEpsilon)
+                {
+                    cost[j][i] = candidate;
+                    split[j][i] = k;
+                }
+            }
+        }
     }
+
+    std::vector<size_t> rowCounts(rowCount, 0);
+    size_t end = count;
+    for (size_t j = rowCount; j > 0; --j)
+    {
+        const size_t begin = split[j][end];
+        rowCounts[j - 1] = end - begin;
+        end = begin;
+    }
+    return rowCounts;
 }
 
 struct LayoutCandidate
 {
-    size_t rowCount = 1;
     std::vector<size_t> rowCounts;
-    double scale = 1.0;
-    double totalWidth = 0.0;
-    double totalHeight = 0.0;
-    double cost = std::numeric_limits<double>::max();
+    double thumbHeight = 0.0;
 };
 }
 
@@ -73,249 +103,114 @@ LayoutResult LayoutEngine::Calculate(
         return result;
     }
 
-    const int workWidth = std::max(1, touchrev::common::RectWidth(workAreaPx));
-    const int workHeight = std::max(1, touchrev::common::RectHeight(workAreaPx));
-    const bool isPortrait = workHeight > workWidth;
+    const double workWidth = static_cast<double>(std::max(1, touchrev::common::RectWidth(workAreaPx)));
+    const double workHeight = static_cast<double>(std::max(1, touchrev::common::RectHeight(workAreaPx)));
 
     const double safeScale = std::max(0.01, scale);
     const double paddingPx = paddingDip * safeScale;
     const double gapPx = itemGapDip * safeScale;
+    const double borderPx = 2.0 * safeScale;
 
-    // 1. 连续曲线采样基础缩放比 sn
-    const double sn = SampleBaseScale(count, isPortrait);
-
-    // 2. 计算各卡片的基础宽高 (未缩放前)
-    std::vector<SizeDouble> baseSizes;
-    baseSizes.reserve(count);
-
+    // 卡片模板按星号比例分配标题行与内容行，标题高度必须随缩略图高度等比变化，
+    // 内容区才正好是窗口的宽高比。
     const double safeContentWeight = contentRowWeight > 0.0 ? contentRowWeight : 1.0;
-    const double titleRatio = titleRowWeight / safeContentWeight;
+    const double titleRatio = std::max(0.0, titleRowWeight) / safeContentWeight;
 
+    std::vector<double> aspects;
+    aspects.reserve(count);
     for (const auto& window : windows)
     {
-        double aspect = 1.0;
-        if (window.heightPx > 0.0)
-        {
-            aspect = window.widthPx / window.heightPx;
-        }
-        aspect = std::clamp(aspect, minAspect, maxAspect);
-
-        double itemWidth = 0.0;
-        double itemHeight = 0.0;
-        if (!isPortrait)
-        {
-            const double thumbHeight = static_cast<double>(workHeight) * sn;
-            const double titleHeight = static_cast<double>(workHeight) * titleRatio * 0.30;
-            itemHeight = thumbHeight + titleHeight;
-            itemWidth = thumbHeight * aspect;
-        }
-        else
-        {
-            const double maxAllowedItemHeight = static_cast<double>(workHeight) * 0.5;
-            const double targetWidth = static_cast<double>(workWidth) * sn;
-            const double thumbHeightByWidth = targetWidth / aspect;
-            const double itemHeightByWidth = thumbHeightByWidth * 1.25;
-
-            if (itemHeightByWidth <= maxAllowedItemHeight)
-            {
-                itemWidth = targetWidth;
-                itemHeight = itemHeightByWidth;
-            }
-            else
-            {
-                itemHeight = maxAllowedItemHeight;
-                const double thumbHeight = itemHeight / 1.25;
-                itemWidth = thumbHeight * aspect;
-            }
-        }
-
-        itemHeight += 2.0 * safeScale;
-        baseSizes.push_back({itemWidth, itemHeight});
+        const double aspect = window.heightPx > 0.0 ? window.widthPx / window.heightPx : 1.0;
+        aspects.push_back(std::clamp(aspect, minAspect, maxAspect));
     }
 
-    // 3. 产生候选行划分并进行多目标代价评估
-    const size_t maxPossibleRows = isPortrait
-        ? std::min<size_t>(count, 6)
-        : std::min<size_t>(count, count >= 16 ? 5 : 4);
+    const double availableWidth = std::max(10.0, workWidth * 0.92 - paddingPx * 2.0);
+    const double availableHeight = std::max(10.0, workHeight * 0.88 - paddingPx * 2.0);
+    const double thumbHeightCap = std::min(workWidth, workHeight) * SampleThumbnailScale(count);
 
-    const double screenAspect = static_cast<double>(workWidth) / static_cast<double>(workHeight);
-    const double targetAspect = isPortrait
-        ? std::clamp(screenAspect * 1.05, 0.45, 0.90)
-        : std::clamp(screenAspect * 0.95, 1.30, 2.40);
-
-    const double maxAllowedWidth = static_cast<double>(workWidth) * 0.92;
-    const double maxAllowedHeight = static_cast<double>(workHeight) * 0.88;
-    const double maxContentW = std::max(10.0, maxAllowedWidth - paddingPx * 2.0);
-    const double maxContentH = std::max(10.0, maxAllowedHeight - paddingPx * 2.0);
-
-    LayoutCandidate bestCandidate;
-
-    for (size_t r = 1; r <= maxPossibleRows; ++r)
+    // 对每个行数求能放下的最大缩略图高度，取卡片最大的方案；
+    // 差距在 2% 以内时取行数少的，能排成一行就不拆行。
+    const size_t maxRows = std::min<size_t>(count, 6);
+    const double gapUnits = gapPx / std::max(1.0, thumbHeightCap);
+    LayoutCandidate best;
+    for (size_t rowCount = 1; rowCount <= maxRows; ++rowCount)
     {
-        LayoutCandidate cand;
-        cand.rowCount = r;
-        cand.rowCounts.resize(r);
+        LayoutCandidate candidate;
+        candidate.rowCounts = PartitionRows(aspects, rowCount, gapUnits);
 
-        const size_t q = count / r;
-        const size_t remainder = count % r;
-        if (q == 0)
+        double heightByWidth = std::numeric_limits<double>::max();
+        size_t index = 0;
+        for (const size_t rowLen : candidate.rowCounts)
         {
-            continue;
-        }
-
-        // 行均衡划分：保证任意两行卡片数差 <= 1
-        for (size_t i = 0; i < r; ++i)
-        {
-            cand.rowCounts[i] = (i < remainder) ? (q + 1) : q;
-        }
-
-        // 模拟计算未缩放时的各行尺寸
-        double candMaxRowWidth = 0.0;
-        double candTotalRowHeight = 0.0;
-        size_t windowIdx = 0;
-
-        for (size_t i = 0; i < r; ++i)
-        {
-            const size_t rowLen = cand.rowCounts[i];
-            double currentRowWidth = 0.0;
-            double currentRowMaxH = 0.0;
-
+            double aspectSum = 0.0;
             for (size_t c = 0; c < rowLen; ++c)
             {
-                const auto& sz = baseSizes[windowIdx++];
-                currentRowWidth += sz.width;
-                if (c > 0)
-                {
-                    currentRowWidth += gapPx;
-                }
-                currentRowMaxH = std::max(currentRowMaxH, sz.height);
+                aspectSum += aspects[index++];
             }
-
-            candMaxRowWidth = std::max(candMaxRowWidth, currentRowWidth);
-            candTotalRowHeight += currentRowMaxH;
-            if (i > 0)
-            {
-                candTotalRowHeight += gapPx;
-            }
+            const double rowGaps = gapPx * static_cast<double>(rowLen - 1);
+            heightByWidth = std::min(heightByWidth, (availableWidth - rowGaps) / std::max(0.01, aspectSum));
         }
 
-        // 容纳比例缩放
-        const double fitScaleX = (candMaxRowWidth > maxContentW) ? (maxContentW / candMaxRowWidth) : 1.0;
-        const double fitScaleY = (candTotalRowHeight > maxContentH) ? (maxContentH / candTotalRowHeight) : 1.0;
-        cand.scale = std::min(1.0, std::min(fitScaleX, fitScaleY));
+        const double rows = static_cast<double>(rowCount);
+        const double heightByHeight =
+            (availableHeight - gapPx * (rows - 1.0) - borderPx * rows) / (rows * (1.0 + titleRatio));
 
-        const double finalContentW = candMaxRowWidth * cand.scale;
-        const double finalContentH = candTotalRowHeight * cand.scale;
-        cand.totalWidth = finalContentW + paddingPx * 2.0;
-        cand.totalHeight = finalContentH + paddingPx * 2.0;
-
-        // 计算多目标代价
-        const double currentAspect = cand.totalWidth / std::max(1.0, cand.totalHeight);
-        const double aspectPenalty = std::abs(std::log(currentAspect) - std::log(targetAspect));
-
-        // 缩放惩罚：过度缩小予以惩罚
-        const double scalePenalty = (1.0 / std::max(0.01, cand.scale)) - 1.0;
-
-        // 行不平衡惩罚 (轻微偏好多行整齐)
-        const double balancePenalty = static_cast<double>(remainder * (r - remainder)) / static_cast<double>(r * r);
-
-        // 偏好惩罚：小窗口不拆多行，多窗口不挤单行
-        double layoutBiasPenalty = 0.0;
-        if (count <= 2 && r > 1)
+        candidate.thumbHeight = std::max(1.0, std::min({thumbHeightCap, heightByWidth, heightByHeight}));
+        if (best.rowCounts.empty() || candidate.thumbHeight > best.thumbHeight * 1.02)
         {
-            layoutBiasPenalty += 2.0;
-        }
-        else if (count >= 6 && r == 1)
-        {
-            layoutBiasPenalty += 1.8;
-        }
-        else if (count >= 12 && r <= 2 && !isPortrait)
-        {
-            layoutBiasPenalty += 0.8;
-        }
-
-        cand.cost = 1.6 * aspectPenalty + 3.2 * scalePenalty + 0.8 * balancePenalty + layoutBiasPenalty;
-
-        if (cand.cost < bestCandidate.cost)
-        {
-            bestCandidate = cand;
+            best = std::move(candidate);
         }
     }
 
-    // 4. 基于最优候选构建精确像素布局
+    // 按选中的方案摆放：所有卡片同高，每行水平居中，行间等距。
+    const double thumbHeight = best.thumbHeight;
+    const double itemHeight = std::round(thumbHeight * (1.0 + titleRatio) + borderPx);
+
+    std::vector<double> rowWidths;
+    rowWidths.reserve(best.rowCounts.size());
+    double maxRowWidth = 0.0;
+    size_t index = 0;
+    for (const size_t rowLen : best.rowCounts)
+    {
+        double rowWidth = gapPx * static_cast<double>(rowLen - 1);
+        for (size_t c = 0; c < rowLen; ++c)
+        {
+            rowWidth += std::round(thumbHeight * aspects[index++]);
+        }
+        rowWidths.push_back(rowWidth);
+        maxRowWidth = std::max(maxRowWidth, rowWidth);
+    }
+
     result.items.resize(count);
-    const double finalScale = bestCandidate.scale;
-    const double effectiveGapPx = gapPx * finalScale;
-
-    // 重新计算缩放后的各行卡片几何
-    std::vector<double> rowWidths(bestCandidate.rowCount, 0.0);
-    std::vector<double> rowHeights(bestCandidate.rowCount, 0.0);
-    double maxSeenWidth = 0.0;
-    size_t winIndex = 0;
-
-    for (size_t r = 0; r < bestCandidate.rowCount; ++r)
-    {
-        const size_t rowLen = bestCandidate.rowCounts[r];
-        double curRowW = 0.0;
-        double curRowH = 0.0;
-
-        for (size_t c = 0; c < rowLen; ++c)
-        {
-            const auto& sz = baseSizes[winIndex++];
-            const double w = sz.width * finalScale;
-            const double h = sz.height * finalScale;
-            curRowW += w;
-            if (c > 0)
-            {
-                curRowW += effectiveGapPx;
-            }
-            curRowH = std::max(curRowH, h);
-        }
-
-        rowWidths[r] = curRowW;
-        rowHeights[r] = curRowH;
-        maxSeenWidth = std::max(maxSeenWidth, curRowW);
-    }
-
-    // 布局卡片并执行行内水平居中
     double curY = 0.0;
-    winIndex = 0;
-
-    for (size_t r = 0; r < bestCandidate.rowCount; ++r)
+    index = 0;
+    for (size_t r = 0; r < best.rowCounts.size(); ++r)
     {
-        const size_t rowLen = bestCandidate.rowCounts[r];
-        const double rowW = rowWidths[r];
-        const double offsetX = (maxSeenWidth - rowW) / 2.0;
-        double curX = 0.0;
-
-        for (size_t c = 0; c < rowLen; ++c)
+        double curX = (maxRowWidth - rowWidths[r]) / 2.0;
+        for (size_t c = 0; c < best.rowCounts[r]; ++c)
         {
-            const auto& sz = baseSizes[winIndex];
-            const double w = std::round(sz.width * finalScale);
-            const double h = std::round(sz.height * finalScale);
-
-            const LONG left = static_cast<LONG>(std::lround(curX + offsetX + paddingPx));
+            const double itemWidth = std::round(thumbHeight * aspects[index]);
+            const LONG left = static_cast<LONG>(std::lround(curX + paddingPx));
             const LONG top = static_cast<LONG>(std::lround(curY + paddingPx));
-
-            result.items[winIndex].rectPx = {
+            result.items[index].rectPx = {
                 left,
                 top,
-                static_cast<LONG>(left + w),
-                static_cast<LONG>(top + h)};
+                static_cast<LONG>(left + itemWidth),
+                static_cast<LONG>(top + itemHeight)};
 
-            curX += w + effectiveGapPx;
-            ++winIndex;
+            curX += itemWidth + gapPx;
+            ++index;
         }
 
-        curY += rowHeights[r];
-        if (r + 1 < bestCandidate.rowCount)
+        curY += itemHeight;
+        if (r + 1 < best.rowCounts.size())
         {
-            curY += effectiveGapPx;
+            curY += gapPx;
         }
     }
 
     result.totalSizePx = {
-        static_cast<LONG>(std::ceil(maxSeenWidth + paddingPx * 2.0)),
+        static_cast<LONG>(std::ceil(maxRowWidth + paddingPx * 2.0)),
         static_cast<LONG>(std::ceil(curY + paddingPx * 2.0))};
 
     return result;
@@ -458,7 +353,7 @@ size_t LayoutEngine::FindColumnExtreme(
 
     const auto& current = items[currentIndex];
     const double currentCenterX = current.position.x + current.size.width * 0.5;
-    
+
     size_t bestIndex = currentIndex;
     double extremeY = current.position.y;
 
@@ -498,5 +393,3 @@ size_t LayoutEngine::FindColumnExtreme(
     return bestIndex;
 }
 }
-
-

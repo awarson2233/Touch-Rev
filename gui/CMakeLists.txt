@@ -1,6 +1,8 @@
 add_executable(TouchRevGUI WIN32
     main.cpp
     TouchRevGUI.rc
+    hook/HookController.cpp
+    hook/HookController.h
     ui/switcher/MainWindow.cpp
     ui/switcher/MainWindow.h
     ui/config/ConfigWindow.cpp
@@ -17,6 +19,10 @@ add_executable(TouchRevGUI WIN32
     ui/switcher/ThinXamlAppSwitcherHost.h
     ui/shared/ThemeManager.cpp
     ui/shared/ThemeManager.h
+    ui/shared/AppIcon.cpp
+    ui/shared/AppIcon.h
+    ui/shared/TrayIcon.cpp
+    ui/shared/TrayIcon.h
     thumbnail/PrivateThumbnailInterfaces.h
     thumbnail/PrivateThumbnailManager.cpp
     thumbnail/PrivateThumbnailManager.h

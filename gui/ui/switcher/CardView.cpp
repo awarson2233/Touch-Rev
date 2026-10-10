@@ -103,6 +103,10 @@ bool CardView::Initialize(
         appIcon = root.FindName(L"AppIcon").as<winrt::Windows::UI::Xaml::Controls::Image>();
         closeButton = root.FindName(L"CloseButton").as<winrt::Windows::UI::Xaml::Controls::Button>();
         thumbnailHost = root.FindName(L"ContentFrame").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        if (auto placeholder = root.FindName(L"ThumbnailPlaceholderText"))
+        {
+            thumbnailPlaceholder = placeholder.try_as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
+        }
         pressOverlay = root.FindName(L"PressOverlay").as<winrt::Windows::UI::Xaml::Controls::Border>();
 
         ApplyRowWeights();
@@ -279,6 +283,10 @@ void CardView::ClearThumbnail()
 
     thumbnailError = S_OK;
     thumbnailFailed = false;
+    if (thumbnailPlaceholder)
+    {
+        thumbnailPlaceholder.Text(L"");
+    }
 }
 
 void CardView::Reset()
@@ -400,6 +408,10 @@ void CardView::EnsureThumbnail(
             thumbnailError = slot.lastError;
             thumbnailFailed = true;
             thumbnailSlot.reset();
+            if (thumbnailPlaceholder)
+            {
+                thumbnailPlaceholder.Text(L"窗口预览不可用");
+            }
         }
     }
     else if (thumbnailSlot)
@@ -424,6 +436,7 @@ void CardView::Destroy()
     appIcon = nullptr;
     closeButton = nullptr;
     thumbnailHost = nullptr;
+    thumbnailPlaceholder = nullptr;
     pressOverlay = nullptr;
 }
 

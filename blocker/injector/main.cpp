@@ -278,10 +278,18 @@ int wmain(int argc, wchar_t** argv) {
 
         touchrev::RemoteModuleInfo unloadedModule;
         DWORD freeLibraryResult = 0;
+        bool unloadDeferred = false;
         if (!touchrev::UninstallDllFromProcess(target.pid, fullDllPath,
                                                &unloadedModule,
-                                               &freeLibraryResult, &error)) {
+                                               &freeLibraryResult, &error,
+                                               &unloadDeferred)) {
             return Fail(error);
+        }
+
+        if (unloadDeferred) {
+            std::wcout << L"Status: stop deferred\n";
+            std::wcout << L"Hook is still initializing; it will restore the gesture table and unload itself when done.\n";
+            break;
         }
 
         if (!unloadedModule.module) {

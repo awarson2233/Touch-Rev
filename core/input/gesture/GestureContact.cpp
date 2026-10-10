@@ -6,8 +6,17 @@ namespace touchrev::gesture
 {
 namespace
 {
-Point ToGesturePoint(const RawTouchInput::TouchPoint& point)
+// 有物理尺寸时换算为 0.1mm；描述符缺失物理信息时沿用逻辑单位 × 0.1（多数数字化仪约 0.01mm/单位）。
+Point ToGesturePoint(const RawTouchInput::TouchPoint& point, const RawTouchInput::DeviceGeometry& geometry)
 {
+    if (geometry.physicalValid)
+    {
+        return {
+            static_cast<double>(point.x - geometry.logicalMinX) * geometry.tenthMmPerUnitX,
+            static_cast<double>(point.y - geometry.logicalMinY) * geometry.tenthMmPerUnitY,
+        };
+    }
+
     return {static_cast<double>(point.x) * 0.1, static_cast<double>(point.y) * 0.1};
 }
 
@@ -17,9 +26,9 @@ bool IsActivePoint(const RawTouchInput::TouchPoint& point)
 }
 }
 
-GestureContact GestureContact::FromTouchPoint(const RawTouchInput::TouchPoint& point)
+GestureContact GestureContact::FromTouchPoint(const RawTouchInput::TouchPoint& point, const RawTouchInput::DeviceGeometry& geometry)
 {
-    const Point gesturePoint = ToGesturePoint(point);
+    const Point gesturePoint = ToGesturePoint(point, geometry);
     return {
         .contactId = point.contactId,
         .state = ContactState::Started,
@@ -36,10 +45,10 @@ GestureContact GestureContact::FromTouchPoint(const RawTouchInput::TouchPoint& p
     };
 }
 
-void GestureContact::UpdateFromTouchPoint(const RawTouchInput::TouchPoint& point)
+void GestureContact::UpdateFromTouchPoint(const RawTouchInput::TouchPoint& point, const RawTouchInput::DeviceGeometry& geometry)
 {
     previous = current;
-    current = ToGesturePoint(point);
+    current = ToGesturePoint(point, geometry);
     rawX = point.x;
     rawY = point.y;
     rawWidth = point.width;
@@ -90,19 +99,19 @@ std::vector<GestureContactEvent> GestureContactTracker::ProcessFrame(const RawTo
                 events.push_back({.kind = GestureContactEvent::Kind::Ended, .contact = stale});
             }
 
-            active = GestureContact::FromTouchPoint(point);
+            active = GestureContact::FromTouchPoint(point, frame.geometry);
             events.push_back({.kind = GestureContactEvent::Kind::Started, .contact = *active});
         }
         else if (point.state == RawTouchInput::PointState::Moved)
         {
             if (active.has_value())
             {
-                active->UpdateFromTouchPoint(point);
+                active->UpdateFromTouchPoint(point, frame.geometry);
                 events.push_back({.kind = GestureContactEvent::Kind::Updated, .contact = *active});
             }
             else
             {
-                active = GestureContact::FromTouchPoint(point);
+                active = GestureContact::FromTouchPoint(point, frame.geometry);
                 events.push_back({.kind = GestureContactEvent::Kind::Started, .contact = *active});
             }
         }
@@ -110,7 +119,7 @@ std::vector<GestureContactEvent> GestureContactTracker::ProcessFrame(const RawTo
         {
             if (active.has_value())
             {
-                active->UpdateFromTouchPoint(point);
+                active->UpdateFromTouchPoint(point, frame.geometry);
                 active->End();
                 events.push_back({.kind = GestureContactEvent::Kind::Ended, .contact = *active});
                 active.reset();

@@ -1,5 +1,8 @@
+#include "hook/HookController.h"
 #include "ui/switcher/MainWindow.h"
 #include "ui/config/ConfigWindow.h"
+#include "ui/shared/TrayIcon.h"
+#include "common/AppSettings.h"
 #include "common/Win32Error.h"
 
 #include <windows.h>
@@ -105,34 +108,116 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int /*showCommand*/)
         return redirected ? 0 : -1;
     }
 
+    const auto cleanup = [&](int code) {
+        if (singleInstanceMutex)
+        {
+            ReleaseMutex(singleInstanceMutex);
+            CloseHandle(singleInstanceMutex);
+        }
+        if (shouldRoUninitialize)
+        {
+            RoUninitialize();
+        }
+        return code;
+    };
+
+    // 没有在运行的实例可退出：直接结束，不创建窗口，更不能按启动策略去注入 explorer。
+    if (command == MainWindow::ActivationCommand::Exit)
+    {
+        return cleanup(0);
+    }
+
+    // 配置先于窗口载入，手势开关等状态在首帧就是正确的。
+    touchrev::settings::Load();
+
     MainWindow app;
+    ConfigWindow config;
+    touchrev::ui::TrayIcon tray;
+    touchrev::hook::HookController hook;
+
+    // 拦截操作在后台线程完成后回到这里：刷新界面；用户在控制中心发起的操作弹框反馈，其余走托盘气泡。
+    const bool hookReady = hook.Initialize(instance, [&config, &tray](const touchrev::hook::OperationResult& result) {
+        config.RefreshHookUi();
+        if (result.message.empty())
+        {
+            return;
+        }
+
+        const bool isError = !result.succeeded;
+        if (result.userInitiated && config.IsVisible())
+        {
+            MessageBoxW(config.Hwnd(), result.message.c_str(), L"Touch-Rev",
+                        MB_OK | (isError ? MB_ICONERROR : MB_ICONINFORMATION));
+        }
+        else
+        {
+            tray.Notify(L"Touch-Rev", result.message, isError);
+        }
+    });
+    if (!hookReady)
+    {
+        DebugLog(L"HookController initialization failed; hook operations are unavailable.");
+    }
+
     if (!app.Initialize(instance, SW_HIDE))
     {
         MessageBoxW(nullptr, L"Failed to create the main window.", L"TouchRevGUI", MB_ICONERROR | MB_OK);
-        if (singleInstanceMutex)
-        {
-            CloseHandle(singleInstanceMutex);
-        }
-        if (shouldRoUninitialize)
-        {
-            RoUninitialize();
-        }
-        return -1;
+        hook.Shutdown(false);
+        return cleanup(-1);
     }
 
-    ConfigWindow config;
+    config.SetHookController(&hook);
+    // 所有退出入口统一走 ExitApplication，保证窗口与 XAML 按序拆除。
+    config.SetExitCallback([&app]() { app.ExitApplication(); });
     if (!config.Initialize(instance, command == MainWindow::ActivationCommand::Hide ? SW_HIDE : SW_SHOWNORMAL))
     {
         MessageBoxW(nullptr, L"Failed to create the config window.", L"TouchRevGUI", MB_ICONERROR | MB_OK);
-        if (singleInstanceMutex)
+        hook.Shutdown(false);
+        return cleanup(-1);
+    }
+
+    app.SetConfigVisibilityCallback([&config](bool visible) {
+        if (visible)
         {
-            CloseHandle(singleInstanceMutex);
+            config.Show();
         }
-        if (shouldRoUninitialize)
+        else
         {
-            RoUninitialize();
+            config.Hide();
         }
-        return -1;
+    });
+
+    const auto notifyHookBusy = [&tray]() {
+        tray.Notify(L"Touch-Rev", L"上一个拦截操作仍在进行，请稍候。");
+    };
+
+    touchrev::ui::TrayCallbacks trayCallbacks;
+    trayCallbacks.onOpenConfig = [&config]() { config.Show(); };
+    trayCallbacks.onQueryHookEnabled = [&hook]() { return hook.IsEffective(); };
+    trayCallbacks.onQueryHookBusy = [&hook]() { return hook.IsBusy(); };
+    trayCallbacks.onToggleHook = [&hook, &config, notifyHookBusy](bool enable) {
+        const bool accepted = enable ? hook.RequestEnable(true) : hook.RequestDisable(true);
+        if (!accepted)
+        {
+            notifyHookBusy();
+        }
+        config.RefreshHookUi();
+    };
+    trayCallbacks.onClearPdbCache = [&hook, &config, notifyHookBusy]() {
+        if (!hook.RequestClearCache(true))
+        {
+            notifyHookBusy();
+        }
+        config.RefreshHookUi();
+    };
+    trayCallbacks.onExit = [&app]() { app.ExitApplication(); };
+    trayCallbacks.onTaskbarCreated = [&hook, &config]() {
+        hook.OnExplorerRestarted();
+        config.RefreshHookUi();
+    };
+    if (!tray.Initialize(instance, std::move(trayCallbacks)))
+    {
+        DebugLog(L"Tray icon initialization failed; continuing without a tray entry.");
     }
 
     switch (command)
@@ -142,26 +227,21 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int /*showCommand*/)
         app.Hide();
         break;
     case MainWindow::ActivationCommand::Toggle:
+        app.ToggleSwitcher();
+        break;
     case MainWindow::ActivationCommand::Show:
+    case MainWindow::ActivationCommand::Exit:
         config.Show();
         break;
-    case MainWindow::ActivationCommand::Exit:
-        app.ExitApplication();
-        break;
     }
+
+    // 注入在后台线程执行，不阻塞首个消息循环；失败通过托盘气泡反馈。
+    hook.ApplyStartupPolicy(touchrev::settings::Current().hookAutoInstall);
+    config.RefreshHookUi();
 
     const int result = app.Run();
-
-    if (singleInstanceMutex)
-    {
-        ReleaseMutex(singleInstanceMutex);
-        CloseHandle(singleInstanceMutex);
-    }
-
-    if (shouldRoUninitialize)
-    {
-        RoUninitialize();
-    }
-
-    return result;
+    tray.Shutdown();
+    // 退出时卸载拦截，恢复 Windows 默认三指手势并释放 explorer 对 DLL 的占用。
+    hook.Shutdown(true);
+    return cleanup(result);
 }

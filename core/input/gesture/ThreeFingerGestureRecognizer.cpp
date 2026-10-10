@@ -5,7 +5,7 @@
 
 namespace
 {
-constexpr double kMaxFingerDistance = 800.0;
+constexpr double kMaxFingerDistance = 800.0;  // 0.1mm，同一只手三指的最大跨度
 constexpr double kMoveEpsilon = 0.1;
 constexpr double kFastTrackTapMaxDurationMs = 500.0;
 }

@@ -50,7 +50,7 @@ public:
         std::array<DWORD, 3> activeIds{};
         std::array<DWORD, 3> startIds{};
         bool deltaValid = false;
-        // 触摸中心的原始屏幕坐标（0.1mm 单位），用于显示器定位
+        // 触摸中心的 HID 逻辑坐标，须经设备量程换算后才能用于显示器定位
         LONG rawCenterX = 0;
         LONG rawCenterY = 0;
         bool hasRawCenter = false;
@@ -59,6 +59,8 @@ public:
     Result ProcessFrame(const RawTouchInput::Frame& frame);
     Result Tick();
     void Reset();
+    // 只有会话进行中 Tick 才有意义，调用方据此启停定时器。
+    bool HasActiveSession() const { return session_ != nullptr; }
 
 private:
     struct FingerPoint

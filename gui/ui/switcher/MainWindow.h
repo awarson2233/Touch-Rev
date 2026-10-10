@@ -8,6 +8,8 @@
 
 #include <windows.h>
 
+#include <functional>
+
 class MainWindow
 {
 public:
@@ -25,6 +27,8 @@ public:
 
     bool Initialize(HINSTANCE instance, int showCommand);
     int Run();
+    // 唤醒消息要显示/隐藏配置窗口时回调宿主，避免这里直接操作另一个窗口的内部状态。
+    void SetConfigVisibilityCallback(std::function<void(bool)> callback);
     void ShowSwitcher(const POINT* touchCenter = nullptr);
     void Hide();
     void ToggleSwitcher();
@@ -52,8 +56,17 @@ private:
     ActivationResult TryActivateSwitcher();
     void SyncClientLayout(UINT width, UINT height, bool renderSwitcher);
     void RebaseActiveDrag();
+    // 按识别器是否有进行中的会话启停手势定时器。
+    void UpdateGestureTimer();
+    // 由目标显示器的 rcMonitor 与 rcWork 之差得出任务栏占用的四边，交给卡片排版避让。
+    void ApplyWorkAreaInsets();
     void ForwardDpiChangeToChild(WPARAM wParam, LPARAM lParam);
     void HandleInputResult(const InputController::Result& result);
+    // 首帧闸门：布局提交完成后才解除 cloak，避免呼出瞬间看到旧布局跳变。
+    void BeginRevealAfterFirstFrame();
+    void RevealNow();
+    void CancelPendingReveal();
+    void PrewarmSwitcher();
     void DispatchGestureAction(const InputController::RawInputResult& inputResult);
     bool HandleKeyDown(WPARAM key);
     HMONITOR ResolveTargetMonitor(const POINT* touchCenter = nullptr) const;
@@ -87,4 +100,11 @@ private:
     bool pendingLongPressActivation_ = false;
     bool activationSucceeded_ = false;
     bool keyboardNavigationEnabled_ = false;
+    std::function<void(bool)> configVisibilityCallback_;
+    bool isPrewarmed_ = false;
+    bool gestureTimerActive_ = false;
+    bool gestureInputSuspended_ = false;
+    bool revealPending_ = false;
+    int pendingRevealFrames_ = 0;
+    winrt::event_token renderingToken_{};
 };

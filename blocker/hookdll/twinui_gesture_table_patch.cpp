@@ -166,8 +166,25 @@ void LogGestureTableEntries(const GestureTableRange& range) {
     }
 }
 
+// explorer 的线程随时可能在读表，整条 24 字节无法原子写入。只改 type/fingerCount 两个 4 字节字段，
+// 并按顺序逐个原子写：屏蔽时先清 type、恢复时先写 fingerCount，中间态 (0, n) 不会匹配任何手势。
+void WriteEntryFields(TouchGestureTargetEntry* entry,
+                      const TouchGestureTargetEntry& value,
+                      bool typeFirst) {
+    auto* type = reinterpret_cast<volatile LONG*>(&entry->type);
+    auto* fingerCount = reinterpret_cast<volatile LONG*>(&entry->fingerCount);
+    if (typeFirst) {
+        InterlockedExchange(type, value.type);
+        InterlockedExchange(fingerCount, value.fingerCount);
+    } else {
+        InterlockedExchange(fingerCount, value.fingerCount);
+        InterlockedExchange(type, value.type);
+    }
+}
+
 bool WriteGestureTableEntry(TouchGestureTargetEntry* entry,
                             const TouchGestureTargetEntry& value,
+                            bool typeFirst,
                             PCWSTR operation,
                             PCWSTR tableName,
                             std::size_t index) {
@@ -181,7 +198,7 @@ bool WriteGestureTableEntry(TouchGestureTargetEntry* entry,
         return false;
     }
 
-    *entry = value;
+    WriteEntryFields(entry, value, typeFirst);
 
     DWORD ignoredProtect = 0;
     if (!VirtualProtect(entry, sizeof(*entry), oldProtect, &ignoredProtect)) {
@@ -211,7 +228,7 @@ bool PatchGestureTableEntry(const GestureTableRange& range,
     patched.fingerCount = 0;
 
     records->push_back(PatchRecord{range.displayName, index, entry, original});
-    if (!WriteGestureTableEntry(entry, patched, L"patch", range.displayName, index)) {
+    if (!WriteGestureTableEntry(entry, patched, true, L"patch", range.displayName, index)) {
         return false;
     }
 
@@ -241,7 +258,7 @@ bool PatchGestureTable(const GestureTableRange& range,
 }
 
 bool RestorePatchRecord(const PatchRecord& record) {
-    if (!WriteGestureTableEntry(record.entry, record.original, L"restore",
+    if (!WriteGestureTableEntry(record.entry, record.original, false, L"restore",
                                 record.tableName, record.index)) {
         return false;
     }

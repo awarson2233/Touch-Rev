@@ -5,6 +5,9 @@
 #include "common/AppSettings.h"
 #include "common/DwmUtils.h"
 
+#include <winrt/Windows.Foundation.h>
+#include <winrt/Windows.UI.Xaml.Media.h>
+
 #include <algorithm>
 #include <dwmapi.h>
 #include <sstream>
@@ -18,6 +21,13 @@ constexpr wchar_t kWindowTitle[] = L"Touch Rev GUI";
 // 与 RawTouchInputViewer 对齐：定时推进三指长按状态机（静止时硬件不持续上报帧）。
 constexpr UINT_PTR kGestureTimerId = 1;
 constexpr UINT kGestureTimerMs = 16;
+
+// 首帧闸门的兜底定时器：渲染回调迟迟不来时也必须把窗口揭示出去。
+constexpr UINT_PTR kRevealFallbackTimerId = 2;
+constexpr UINT kRevealFallbackMs = 120;
+
+// 启动后预热切换器视觉树（解析卡片模板、建立缩略图），让首次呼出走热路径。
+constexpr UINT kPrewarmMessage = WM_APP + 1;
 
 #if defined(WM_DWMCOMPOSITIONCHANGED)
 constexpr UINT kWmDwmCompositionChanged = WM_DWMCOMPOSITIONCHANGED;
@@ -106,11 +116,17 @@ bool MainWindow::Initialize(HINSTANCE instance, int showCommand)
         return false;
     }
 
+    ApplyWorkAreaInsets();
     ShowWindow(hwnd_, SW_SHOWNA);
     UpdateWindow(hwnd_);
     touchrev::common::dwm::SetWindowCloaked(hwnd_, true);
     isVisible_ = false;
     return true;
+}
+
+void MainWindow::SetConfigVisibilityCallback(std::function<void(bool)> callback)
+{
+    configVisibilityCallback_ = std::move(callback);
 }
 
 int MainWindow::Run()
@@ -155,26 +171,23 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         switch (static_cast<ActivationCommand>(wParam))
         {
         case ActivationCommand::Show:
-        case ActivationCommand::Toggle:
-        {
-            HWND configHwnd = FindWindowW(L"TouchRevGUI.ConfigWindow", nullptr);
-            if (configHwnd)
+            if (configVisibilityCallback_)
             {
-                ShowWindow(configHwnd, SW_SHOW);
-                SetForegroundWindow(configHwnd);
+                configVisibilityCallback_(true);
             }
             return 0;
-        }
+
+        case ActivationCommand::Toggle:
+            ToggleSwitcher();
+            return 0;
+
         case ActivationCommand::Hide:
-        {
-            HWND configHwnd = FindWindowW(L"TouchRevGUI.ConfigWindow", nullptr);
-            if (configHwnd)
+            if (configVisibilityCallback_)
             {
-                ShowWindow(configHwnd, SW_HIDE);
+                configVisibilityCallback_(false);
             }
             Hide();
             return 0;
-        }
         case ActivationCommand::Exit:
             ExitApplication();
             return 0;
@@ -261,25 +274,53 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         }
         break;
 
+    case kPrewarmMessage:
+        PrewarmSwitcher();
+        return 0;
+
     case WM_INPUT:
     {
-        if (!touchrev::settings::g_IsGestureEnabled)
+        if (!touchrev::settings::Current().gestureEnabled)
         {
-            return 0;
+            // 关闭时丢弃半截会话，重新开启后不会带着陈旧触点继续识别。
+            if (!gestureInputSuspended_)
+            {
+                inputController_.ResetGesture();
+                gestureInputSuspended_ = true;
+                UpdateGestureTimer();
+            }
+            break;
         }
 
-        DispatchGestureAction(inputController_.OnRawInput(lParam));
-        return 0;
+        gestureInputSuspended_ = false;
+        for (const InputController::RawInputResult& result : inputController_.OnRawInput(lParam))
+        {
+            DispatchGestureAction(result);
+        }
+        UpdateGestureTimer();
+        // RIM_INPUT 需要交给 DefWindowProc 做清理。
+        break;
     }
+
+    case WM_INPUT_DEVICE_CHANGE:
+        inputController_.OnInputDeviceChange(wParam, lParam);
+        UpdateGestureTimer();
+        return 0;
 
     case WM_TIMER:
     {
         if (wParam == kGestureTimerId)
         {
-            if (touchrev::settings::g_IsGestureEnabled)
+            if (touchrev::settings::Current().gestureEnabled)
             {
                 DispatchGestureAction(inputController_.OnGestureTick());
             }
+            UpdateGestureTimer();
+            return 0;
+        }
+        if (wParam == kRevealFallbackTimerId)
+        {
+            RevealNow();
             return 0;
         }
         break;
@@ -427,15 +468,36 @@ HRESULT MainWindow::OnCreate()
         return E_FAIL;
     }
     appSwitcherMainView_.ApplyTheme(themeManager_.Mode(), true);
- 
-    SetTimer(hwnd_, kGestureTimerId, kGestureTimerMs, nullptr);
+
+    // 预热放到消息队列里做，不拖慢启动路径。
+    PostMessageW(hwnd_, kPrewarmMessage, 0, 0);
 
     return S_OK;
 }
 
+void MainWindow::PrewarmSwitcher()
+{
+    if (isPrewarmed_ || !hwnd_)
+    {
+        return;
+    }
+    isPrewarmed_ = true;
+
+    // 窗口此刻仍处于 cloaked 状态，可以安全地把卡片模板、缩略图槽位全部建好，
+    // 让首次呼出与后续呼出走同一条热路径。
+    const bool wasSyncing = isSyncingLayout_;
+    isSyncingLayout_ = true;
+    SyncClientLayout(GetClientWidth(hwnd_), GetClientHeight(hwnd_), true);
+    appSwitcherMainView_.EnsureLayoutCommitted();
+    appSwitcherMainView_.ResetSelection();
+    isSyncingLayout_ = wasSyncing;
+}
+
 void MainWindow::OnDestroy()
 {
+    CancelPendingReveal();
     KillTimer(hwnd_, kGestureTimerId);
+    gestureTimerActive_ = false;
     appSwitcherMainView_.Shutdown();
     xamlHost_.Shutdown();
 
@@ -461,8 +523,9 @@ void MainWindow::OnSize(UINT width, UINT height)
 void MainWindow::OnDpiChanged(WPARAM wParam, LPARAM lParam)
 {
     const float newDpi = static_cast<float>(LOWORD(wParam));
-    
-    HMONITOR currentMonitor = ResolveTargetMonitor();
+
+    // 以窗口实际所在的显示器为准：切换器可能因触摸出现在鼠标之外的另一块屏上。
+    HMONITOR currentMonitor = MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST);
     const float realMonitorDpi = GetMonitorDpi(currentMonitor);
 
     // Filter out transient DPI messages that carry stale scaling factors during monitor transitions.
@@ -596,6 +659,37 @@ void MainWindow::SyncClientLayout(UINT width, UINT height, bool renderSwitcher)
     }
 }
 
+void MainWindow::ApplyWorkAreaInsets()
+{
+    // 自动隐藏的任务栏不占工作区，此时四边内缩均为 0。
+    const RECT insets{
+        std::max<LONG>(0, targetWorkAreaPx_.left - targetMonitorRectPx_.left),
+        std::max<LONG>(0, targetWorkAreaPx_.top - targetMonitorRectPx_.top),
+        std::max<LONG>(0, targetMonitorRectPx_.right - targetWorkAreaPx_.right),
+        std::max<LONG>(0, targetMonitorRectPx_.bottom - targetWorkAreaPx_.bottom)};
+    appSwitcherMainView_.SetWorkAreaInsetsPx(insets);
+}
+
+void MainWindow::UpdateGestureTimer()
+{
+    if (!hwnd_)
+    {
+        return;
+    }
+
+    // 空闲时不留常驻定时器，避免 60Hz 唤醒拖累平板续航；会话期间才需要推进静止长按。
+    const bool needed = !gestureInputSuspended_ && inputController_.NeedsGestureTick();
+    if (needed && !gestureTimerActive_)
+    {
+        gestureTimerActive_ = SetTimer(hwnd_, kGestureTimerId, kGestureTimerMs, nullptr) != 0;
+    }
+    else if (!needed && gestureTimerActive_)
+    {
+        KillTimer(hwnd_, kGestureTimerId);
+        gestureTimerActive_ = false;
+    }
+}
+
 void MainWindow::RebaseActiveDrag()
 {
     inputController_.RebaseActiveDrag(hwnd_, appSwitcherMainView_.DragPosition(), coordinates_);
@@ -617,6 +711,7 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
     }
 
     appSwitcherMainView_.ResetSelection();
+    CancelPendingReveal();
 
     isSyncingLayout_ = true;
 
@@ -624,21 +719,18 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
     const MONITORINFO monitorInfo = LoadMonitorInfo(targetMonitor_);
     targetMonitorRectPx_ = monitorInfo.rcMonitor;
     targetWorkAreaPx_ = monitorInfo.rcWork;
+    // 每次呼出重新取工作区：任务栏可能被移动、调整大小或切换自动隐藏。
+    ApplyWorkAreaInsets();
 
     dpi_ = GetMonitorDpi(targetMonitor_);
     const RECT windowRect = targetMonitorRectPx_;
     const int width = windowRect.right - windowRect.left;
     const int height = windowRect.bottom - windowRect.top;
 
-    const WPARAM wp = MAKEWPARAM(static_cast<WORD>(dpi_), static_cast<WORD>(dpi_));
-    RECT childSuggestedRect{0, 0, width, height};
-    ForwardDpiChangeToChild(wp, reinterpret_cast<LPARAM>(&childSuggestedRect));
-
-    SyncClientLayout(width, height, true);
-
     activationSucceeded_ = true;
     keyboardNavigationEnabled_ = true;
 
+    // 主题与窗口几何都要先落定，再跑布局，避免布局之后又被标脏一次。
     SetWindowPos(
         hwnd_,
         HWND_TOPMOST,
@@ -651,22 +743,83 @@ void MainWindow::ShowSwitcher(const POINT* touchCenter)
     RefreshTheme();
     appSwitcherMainView_.ApplyTheme(themeManager_.Mode(), true);
 
-    // 确保首帧完成绘制
-    UpdateWindow(hwnd_);
+    const WPARAM wp = MAKEWPARAM(static_cast<WORD>(dpi_), static_cast<WORD>(dpi_));
+    RECT childSuggestedRect{0, 0, width, height};
+    ForwardDpiChangeToChild(wp, reinterpret_cast<LPARAM>(&childSuggestedRect));
 
-    // 解除 DWM 遮蔽并显示
-    touchrev::common::dwm::SetWindowCloaked(hwnd_, false);
-    ShowWindow(hwnd_, SW_SHOW);
-    isVisible_ = true;
+    SyncClientLayout(width, height, true);
 
-    const ActivationResult activation = TryActivateSwitcher();
-    ApplyActivationVisualState(activation.foreground || activation.directSucceeded);
+    // 同步跑完 measure/arrange，然后等合成帧真正提交后再揭示窗口。
+    appSwitcherMainView_.EnsureLayoutCommitted();
+    BeginRevealAfterFirstFrame();
 
     isSyncingLayout_ = false;
 }
 
+void MainWindow::BeginRevealAfterFirstFrame()
+{
+    if (revealPending_)
+    {
+        return;
+    }
+
+    revealPending_ = true;
+    pendingRevealFrames_ = 0;
+
+    // Rendering 在每帧合成前触发，等满两拍才能确保新布局已经进到已提交的那一帧里。
+    renderingToken_ = winrt::Windows::UI::Xaml::Media::CompositionTarget::Rendering(
+        [this](auto const&, auto const&) {
+            if (++pendingRevealFrames_ < 2)
+            {
+                return;
+            }
+            RevealNow();
+        });
+
+    // 渲染回调不保证一定到来（XAML 异常、渲染线程阻塞），兜底定时器保证窗口一定会出现。
+    SetTimer(hwnd_, kRevealFallbackTimerId, kRevealFallbackMs, nullptr);
+}
+
+void MainWindow::RevealNow()
+{
+    if (!revealPending_ || !hwnd_)
+    {
+        return;
+    }
+
+    CancelPendingReveal();
+
+    touchrev::common::dwm::SetWindowCloaked(hwnd_, false);
+    ShowWindow(hwnd_, SW_SHOW);
+    isVisible_ = true;
+
+    const bool wasSyncing = isSyncingLayout_;
+    isSyncingLayout_ = true;
+    const ActivationResult activation = TryActivateSwitcher();
+    ApplyActivationVisualState(activation.foreground || activation.directSucceeded);
+    isSyncingLayout_ = wasSyncing;
+}
+
+void MainWindow::CancelPendingReveal()
+{
+    if (renderingToken_)
+    {
+        winrt::Windows::UI::Xaml::Media::CompositionTarget::Rendering(renderingToken_);
+        renderingToken_ = {};
+    }
+    if (hwnd_)
+    {
+        KillTimer(hwnd_, kRevealFallbackTimerId);
+    }
+    revealPending_ = false;
+    pendingRevealFrames_ = 0;
+}
+
 void MainWindow::Hide()
 {
+    // 揭示还在排队时也要撤销，否则窗口会在隐藏之后又弹出来。
+    CancelPendingReveal();
+
     if (!hwnd_ || !isVisible_)
     {
         return;
@@ -687,7 +840,7 @@ void MainWindow::Hide()
 
 void MainWindow::ToggleSwitcher()
 {
-    if (isVisible_)
+    if (isVisible_ || revealPending_)
     {
         Hide();
         return;
@@ -719,7 +872,7 @@ void MainWindow::DispatchGestureAction(const InputController::RawInputResult& in
 {
     if (inputResult.action == InputController::InputAction::ShowSwitcher)
     {
-        if (touchrev::settings::g_IsSwitcherWindowEnabled)
+        if (touchrev::settings::Current().switcherWindowEnabled)
         {
             const POINT* touchCenter = inputResult.hasTouchCenter ? &inputResult.touchCenterScreen : nullptr;
             ShowSwitcher(touchCenter);
@@ -727,7 +880,7 @@ void MainWindow::DispatchGestureAction(const InputController::RawInputResult& in
     }
     else if (inputResult.action == InputController::InputAction::LongPressBegin)
     {
-        if (touchrev::settings::g_IsSwitcherWindowEnabled)
+        if (touchrev::settings::Current().switcherWindowEnabled)
         {
             const POINT* touchCenter = inputResult.hasTouchCenter ? &inputResult.touchCenterScreen : nullptr;
             ShowSwitcher(touchCenter);

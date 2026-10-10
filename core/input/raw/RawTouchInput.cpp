@@ -3,6 +3,7 @@
 #include "common/Win32Error.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <limits>
 
@@ -14,7 +15,6 @@ constexpr USHORT kUsageY = 0x31;
 
 constexpr USHORT kUsagePageDigitizer = 0x0D;
 constexpr USHORT kUsageTouchScreen = 0x04;
-constexpr USHORT kUsageTouchPad = 0x05;
 constexpr USHORT kUsageInRange = 0x32;
 constexpr USHORT kUsageTipSwitch = 0x42;
 constexpr USHORT kUsageConfidence = 0x47;
@@ -23,10 +23,12 @@ constexpr USHORT kUsageHeight = 0x49;
 constexpr USHORT kUsageContactId = 0x51;
 constexpr USHORT kUsageContactCount = 0x54;
 
-constexpr USHORT kUsagePageButton = 0x09;
 constexpr NTSTATUS kHidSuccess = HIDP_STATUS_SUCCESS;
 constexpr size_t kMaxTrackedContacts = 256;
-constexpr int kLinkNodeStrideFallback = 0x18;
+
+// 合理的触摸屏物理边长范围（mm），超出视为描述符数据不可信。
+constexpr double kMinPlausibleExtentMm = 20.0;
+constexpr double kMaxPlausibleExtentMm = 2000.0;
 
 std::int64_t QueryCounterValue()
 {
@@ -35,6 +37,125 @@ std::int64_t QueryCounterValue()
     return counter.QuadPart;
 }
 
+bool IsPlausibleExtent(double extentMm)
+{
+    return extentMm >= kMinPlausibleExtentMm && extentMm <= kMaxPlausibleExtentMm;
+}
+
+// 部分描述符把 LogicalMax 写成带符号的满位值（如 16 位 0xFFFF 被读成 -1），按位宽还原成无符号。
+LONG UnsignedLogical(LONG value, USHORT bitSize)
+{
+    if (value >= 0 || bitSize == 0 || bitSize >= 32)
+    {
+        return value;
+    }
+    return static_cast<LONG>(static_cast<ULONG>(value) & ((1ul << bitSize) - 1ul));
+}
+
+bool TryGetAxisCaps(PHIDP_PREPARSED_DATA preparsed, USHORT valueCapsCount, USHORT usage, HIDP_VALUE_CAPS& result)
+{
+    if (valueCapsCount == 0)
+    {
+        return false;
+    }
+
+    std::vector<HIDP_VALUE_CAPS> caps(valueCapsCount);
+    USHORT length = valueCapsCount;
+    if (HidP_GetSpecificValueCaps(HidP_Input, kUsagePageGenericDesktop, 0, usage, caps.data(), &length, preparsed) != kHidSuccess ||
+        length == 0)
+    {
+        return false;
+    }
+
+    result = caps[0];
+    return true;
+}
+
+// HID 单位：低半字节为单位制（1 = SI 线性/cm，3 = 英制线性/inch），次半字节为长度量纲，须为 1。
+double PhysicalExtentMm(const HIDP_VALUE_CAPS& caps, LONG logicalMin, LONG logicalMax)
+{
+    LONG physicalMin = caps.PhysicalMin;
+    LONG physicalMax = caps.PhysicalMax;
+    if (physicalMin == 0 && physicalMax == 0)
+    {
+        // HID 规范：物理范围缺省时等同逻辑范围。
+        physicalMin = logicalMin;
+        physicalMax = logicalMax;
+    }
+    if (physicalMax <= physicalMin)
+    {
+        return 0.0;
+    }
+
+    const ULONG system = caps.Units & 0xF;
+    const ULONG lengthExponent = (caps.Units >> 4) & 0xF;
+    if (lengthExponent != 1)
+    {
+        return 0.0;
+    }
+
+    double unitMm = 0.0;
+    if (system == 1)
+    {
+        unitMm = 10.0;
+    }
+    else if (system == 3)
+    {
+        unitMm = 25.4;
+    }
+    else
+    {
+        return 0.0;
+    }
+
+    int exponent = static_cast<int>(caps.UnitsExp & 0xF);
+    if (exponent >= 8)
+    {
+        exponent -= 16;
+    }
+
+    return static_cast<double>(physicalMax - physicalMin) * unitMm * std::pow(10.0, exponent);
+}
+
+bool FindPointerDevice(HANDLE device, POINTER_DEVICE_INFO& result)
+{
+    UINT32 count = 0;
+    if (!GetPointerDevices(&count, nullptr) || count == 0)
+    {
+        return false;
+    }
+
+    std::vector<POINTER_DEVICE_INFO> devices(count);
+    if (!GetPointerDevices(&count, devices.data()))
+    {
+        return false;
+    }
+    devices.resize(count);
+
+    const POINTER_DEVICE_INFO* onlyTouch = nullptr;
+    int touchCount = 0;
+    for (const POINTER_DEVICE_INFO& info : devices)
+    {
+        if (info.device == device)
+        {
+            result = info;
+            return true;
+        }
+        if (info.pointerDeviceType == POINTER_DEVICE_TYPE_TOUCH)
+        {
+            onlyTouch = &info;
+            ++touchCount;
+        }
+    }
+
+    // 句柄对不上时，只有一块触摸屏的机器仍可确定映射关系。
+    if (touchCount == 1 && onlyTouch)
+    {
+        result = *onlyTouch;
+        return true;
+    }
+    return false;
+}
 }
 
 PHIDP_PREPARSED_DATA RawTouchInput::PreparsedData(DeviceContext& context)
@@ -64,27 +185,34 @@ bool RawTouchInput::Initialize(HWND hwnd)
 
 void RawTouchInput::Reset()
 {
-    ClearActiveFingers();
-    std::fill(previousPoints_.begin(), previousPoints_.end(), TouchPoint{});
     for (DeviceContext& context : deviceContexts_)
     {
+        ClearActiveFingers(context);
+        std::fill(context.previousPoints.begin(), context.previousPoints.end(), TouchPoint{});
         context.remainingContacts = 0;
         context.maxContactsPerPacket = 0;
         context.frameExpected = 0;
         context.frameSeenIds.fill(false);
+        context.lastExpected = 0;
+        context.lastReceived = 0;
+        context.lastFrameSync = false;
     }
-    lastExpected_ = 0;
-    lastReceived_ = 0;
-    lastFrameSync_ = false;
 }
 
-RawTouchInput::Frame RawTouchInput::ProcessRawInput(LPARAM lParam)
+void RawTouchInput::RemoveDevice(HANDLE device)
 {
-    Frame frame{};
+    std::erase_if(deviceContexts_, [device](const DeviceContext& context) {
+        return context.device == device;
+    });
+}
+
+std::vector<RawTouchInput::Frame> RawTouchInput::ProcessRawInput(LPARAM lParam)
+{
+    std::vector<Frame> frames;
     UINT size = 0;
     if (GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, nullptr, &size, sizeof(RAWINPUTHEADER)) != 0 || size == 0)
     {
-        return frame;
+        return frames;
     }
 
     std::vector<BYTE> buffer(size);
@@ -97,22 +225,65 @@ RawTouchInput::Frame RawTouchInput::ProcessRawInput(LPARAM lParam)
     if (readSize == static_cast<UINT>(-1) || readSize == 0)
     {
         DebugLogHResult(L"GetRawInputData(RawTouchInput)", HResultFromLastError());
-        return frame;
+        return frames;
     }
 
     const auto* raw = reinterpret_cast<const RAWINPUT*>(buffer.data());
     if (raw->header.dwType != RIM_TYPEHID || raw->data.hid.dwSizeHid == 0 || raw->data.hid.dwCount == 0)
     {
-        return frame;
+        return frames;
     }
 
     DeviceContext* context = GetDeviceContext(raw->header.hDevice);
     if (!context)
     {
-        return frame;
+        return frames;
     }
 
-    return ParseReports(*context, *raw, QueryCounterValue());
+    ParseReports(*context, *raw, QueryCounterValue(), frames);
+    return frames;
+}
+
+RawTouchInput::DisplayMapping RawTouchInput::QueryDisplayMapping(HANDLE device)
+{
+    DisplayMapping mapping{};
+
+    POINTER_DEVICE_INFO info{};
+    if (device && FindPointerDevice(device, info))
+    {
+        RECT deviceRect{};
+        RECT displayRect{};
+        if (GetPointerDeviceRects(info.device, &deviceRect, &displayRect) &&
+            displayRect.right > displayRect.left && displayRect.bottom > displayRect.top)
+        {
+            mapping.displayRect = displayRect;
+            mapping.monitor = info.monitor ? info.monitor : MonitorFromRect(&displayRect, MONITOR_DEFAULTTONEAREST);
+            mapping.fromPointerDevice = true;
+            return mapping;
+        }
+
+        if (info.monitor)
+        {
+            MONITORINFO monitorInfo{};
+            monitorInfo.cbSize = sizeof(monitorInfo);
+            if (GetMonitorInfoW(info.monitor, &monitorInfo))
+            {
+                mapping.monitor = info.monitor;
+                mapping.displayRect = monitorInfo.rcMonitor;
+                mapping.fromPointerDevice = true;
+                return mapping;
+            }
+        }
+    }
+
+    mapping.monitor = MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFO monitorInfo{};
+    monitorInfo.cbSize = sizeof(monitorInfo);
+    if (mapping.monitor && GetMonitorInfoW(mapping.monitor, &monitorInfo))
+    {
+        mapping.displayRect = monitorInfo.rcMonitor;
+    }
+    return mapping;
 }
 
 RawTouchInput::DeviceContext* RawTouchInput::GetDeviceContext(HANDLE device)
@@ -156,18 +327,89 @@ bool RawTouchInput::InitializeDeviceContext(HANDLE device, DeviceContext& contex
     }
 
     context.device = device;
+    context.hasTipSwitch = HasDigitizerButton(context, kUsageTipSwitch);
+    context.hasInRange = HasDigitizerButton(context, kUsageInRange);
+    context.hasConfidence = HasDigitizerButton(context, kUsageConfidence);
+    LoadDeviceGeometry(context);
     return true;
 }
 
-RawTouchInput::Frame RawTouchInput::ParseReports(DeviceContext& context, const RAWINPUT& raw, std::int64_t timestamp)
+bool RawTouchInput::HasDigitizerButton(DeviceContext& context, USAGE usage)
+{
+    const USHORT capsCount = context.caps.NumberInputButtonCaps;
+    if (capsCount == 0)
+    {
+        return false;
+    }
+
+    std::vector<HIDP_BUTTON_CAPS> caps(capsCount);
+    USHORT length = capsCount;
+    return HidP_GetSpecificButtonCaps(HidP_Input, kUsagePageDigitizer, 0, usage, caps.data(), &length, PreparsedData(context)) == kHidSuccess &&
+           length > 0;
+}
+
+void RawTouchInput::LoadDeviceGeometry(DeviceContext& context)
+{
+    DeviceGeometry& geometry = context.geometry;
+    geometry = {};
+
+    HIDP_VALUE_CAPS xCaps{};
+    HIDP_VALUE_CAPS yCaps{};
+    const USHORT valueCapsCount = context.caps.NumberInputValueCaps;
+    if (!TryGetAxisCaps(PreparsedData(context), valueCapsCount, kUsageX, xCaps) ||
+        !TryGetAxisCaps(PreparsedData(context), valueCapsCount, kUsageY, yCaps))
+    {
+        return;
+    }
+
+    geometry.logicalMinX = UnsignedLogical(xCaps.LogicalMin, xCaps.BitSize);
+    geometry.logicalMaxX = UnsignedLogical(xCaps.LogicalMax, xCaps.BitSize);
+    geometry.logicalMinY = UnsignedLogical(yCaps.LogicalMin, yCaps.BitSize);
+    geometry.logicalMaxY = UnsignedLogical(yCaps.LogicalMax, yCaps.BitSize);
+    geometry.logicalValid = geometry.logicalMaxX > geometry.logicalMinX && geometry.logicalMaxY > geometry.logicalMinY;
+    if (!geometry.logicalValid)
+    {
+        return;
+    }
+
+    const double spanX = static_cast<double>(geometry.logicalMaxX - geometry.logicalMinX);
+    const double spanY = static_cast<double>(geometry.logicalMaxY - geometry.logicalMinY);
+
+    double extentXMm = PhysicalExtentMm(xCaps, geometry.logicalMinX, geometry.logicalMaxX);
+    double extentYMm = PhysicalExtentMm(yCaps, geometry.logicalMinY, geometry.logicalMaxY);
+
+    // 描述符没有可用的物理单位时，退回指针栈报告的设备尺寸（HIMETRIC = 0.01mm）。
+    if (!IsPlausibleExtent(extentXMm) || !IsPlausibleExtent(extentYMm))
+    {
+        POINTER_DEVICE_INFO info{};
+        RECT deviceRect{};
+        RECT displayRect{};
+        if (FindPointerDevice(context.device, info) && GetPointerDeviceRects(info.device, &deviceRect, &displayRect))
+        {
+            extentXMm = static_cast<double>(deviceRect.right - deviceRect.left) / 100.0;
+            extentYMm = static_cast<double>(deviceRect.bottom - deviceRect.top) / 100.0;
+        }
+    }
+
+    if (IsPlausibleExtent(extentXMm) && IsPlausibleExtent(extentYMm))
+    {
+        geometry.physicalValid = true;
+        geometry.tenthMmPerUnitX = extentXMm * 10.0 / spanX;
+        geometry.tenthMmPerUnitY = extentYMm * 10.0 / spanY;
+    }
+}
+
+void RawTouchInput::ParseReports(DeviceContext& context, const RAWINPUT& raw, std::int64_t timestamp, std::vector<Frame>& frames)
 {
     const auto* reportBase = reinterpret_cast<const BYTE*>(raw.data.hid.bRawData);
     const UINT reportSize = raw.data.hid.dwSizeHid;
     const UINT reportCount = raw.data.hid.dwCount;
 
+    bool lastReportReleasedAll = false;
     for (UINT i = 0; i < reportCount; ++i)
     {
         const BYTE* report = reportBase + (static_cast<size_t>(i) * reportSize);
+        lastReportReleasedAll = false;
 
         ULONG contactCount = 0;
         const NTSTATUS countStatus = HidP_GetUsageValue(
@@ -199,17 +441,15 @@ RawTouchInput::Frame RawTouchInput::ParseReports(DeviceContext& context, const R
             {
                 context.frameSeenIds.fill(false);
                 context.frameExpected = 0;
-                lastExpected_ = 0;
-                lastReceived_ = 0;
-                for (const TouchPoint& point : previousPoints_)
-                {
-                    if (point.active)
-                    {
-                        ++lastReceived_;
-                    }
-                }
-                lastFrameSync_ = lastReceived_ > 0;
-                return BuildReleaseAllFrame(context, timestamp);
+                context.lastExpected = 0;
+                context.lastReceived = static_cast<int>(std::count_if(
+                    context.previousPoints.begin(), context.previousPoints.end(), [](const TouchPoint& point) {
+                        return point.active;
+                    }));
+                context.lastFrameSync = context.lastReceived > 0;
+                frames.push_back(BuildReleaseAllFrame(context, timestamp));
+                lastReportReleasedAll = true;
+                continue;
             }
         }
 
@@ -218,35 +458,46 @@ RawTouchInput::Frame RawTouchInput::ParseReports(DeviceContext& context, const R
             ParseContactCollections(context, report, reportSize, contactCount, timestamp);
         }
 
-        lastExpected_ = context.frameExpected;
-        lastReceived_ = static_cast<int>(std::count(context.frameSeenIds.begin(), context.frameSeenIds.end(), true));
-        lastFrameSync_ = context.remainingContacts == 0 && lastReceived_ >= context.frameExpected;
+        context.lastExpected = context.frameExpected;
+        context.lastReceived = static_cast<int>(std::count(context.frameSeenIds.begin(), context.frameSeenIds.end(), true));
+        context.lastFrameSync = context.remainingContacts == 0 && context.lastReceived >= context.frameExpected;
 
-        if (lastFrameSync_)
+        if (context.lastFrameSync)
         {
             for (size_t id = 0; id < kMaxTrackedContacts; ++id)
             {
-                if (activeFingerIds_[id] && !context.frameSeenIds[id])
+                if (context.activeFingerIds[id] && !context.frameSeenIds[id])
                 {
-                    activeFingerIds_[id] = false;
+                    context.activeFingerIds[id] = false;
                 }
+            }
+
+            // 中途完成的帧立即产出，否则会被同一条 WM_INPUT 里后续的帧覆盖掉移动增量。
+            if (i + 1 < reportCount)
+            {
+                frames.push_back(BuildFrame(context, timestamp));
             }
         }
     }
 
+    if (lastReportReleasedAll)
+    {
+        return;
+    }
+
     if (context.frameExpected == 0)
     {
-        lastExpected_ = 0;
-        lastReceived_ = static_cast<int>(std::count(activeFingerIds_.begin(), activeFingerIds_.end(), true));
-        lastFrameSync_ = lastReceived_ > 0;
-        if (lastFrameSync_)
+        context.lastExpected = 0;
+        context.lastReceived = static_cast<int>(std::count(context.activeFingerIds.begin(), context.activeFingerIds.end(), true));
+        context.lastFrameSync = context.lastReceived > 0;
+        if (context.lastFrameSync)
         {
             std::fill(context.frameSeenIds.begin(), context.frameSeenIds.end(), false);
-            ClearActiveFingers();
+            ClearActiveFingers(context);
         }
     }
 
-    return BuildFrame(context, timestamp);
+    frames.push_back(BuildFrame(context, timestamp));
 }
 
 void RawTouchInput::ParseContactCollections(
@@ -277,7 +528,7 @@ void RawTouchInput::ParseContactCollections(
     int processed = 0;
     if (!TryGetRootLinks(context) || context.rootLinks.empty())
     {
-        if (ParseSingleContact(context, report, reportLength, 0, contactCount, timestamp))
+        if (ParseSingleContact(context, report, reportLength, 0, timestamp))
         {
             processed = 1;
         }
@@ -290,7 +541,7 @@ void RawTouchInput::ParseContactCollections(
 
     for (USHORT link : context.rootLinks)
     {
-        ParseSingleContact(context, report, reportLength, link, contactCount, timestamp);
+        ParseSingleContact(context, report, reportLength, link, timestamp);
         ++processed;
         if (processed >= contactsToParse)
         {
@@ -309,7 +560,6 @@ bool RawTouchInput::ParseSingleContact(
     const BYTE* report,
     UINT reportLength,
     USHORT linkCollection,
-    ULONG,
     std::int64_t timestamp)
 {
     const ULONG contactId = GetUsageValue(context, report, reportLength, kUsagePageDigitizer, linkCollection, kUsageContactId);
@@ -343,13 +593,29 @@ bool RawTouchInput::ParseSingleContact(
     const bool tipSwitch = (contactFlags & 0x1) != 0;
     const bool inRange = (contactFlags & 0x20) != 0;
     const bool confidence = (contactFlags & 0x400) != 0;
-    const bool pressed = tipSwitch || inRange || confidence;
+
+    // 抬起帧通常仍带 Confidence=1、Tip=0，只要设备报告 TipSwitch 就以它为准；
+    // Confidence=0 表示设备判定为手掌，不计为手指。
+    bool pressed = false;
+    if (context.hasTipSwitch)
+    {
+        pressed = tipSwitch && !(context.hasConfidence && !confidence);
+    }
+    else if (context.hasInRange || context.hasConfidence)
+    {
+        pressed = inRange || confidence;
+    }
+    else
+    {
+        pressed = true;
+    }
+
     if (contactId >= kMaxTrackedContacts)
     {
         return false;
     }
 
-    Finger& finger = activeFingers_[contactId];
+    Finger& finger = context.activeFingers[contactId];
     finger.id = contactId;
     finger.x = static_cast<LONG>(x);
     finger.y = static_cast<LONG>(y);
@@ -360,7 +626,7 @@ bool RawTouchInput::ParseSingleContact(
     finger.height = static_cast<LONG>(height);
     finger.pressed = pressed;
     finger.timestamp = timestamp;
-    activeFingerIds_[contactId] = true;
+    context.activeFingerIds[contactId] = true;
     context.frameSeenIds[contactId] = true;
     return true;
 }
@@ -445,26 +711,27 @@ RawTouchInput::Frame RawTouchInput::BuildFrame(DeviceContext& context, std::int6
 {
     Frame frame{
         .device = context.device,
-        .contactCount = lastExpected_,
-        .receivedCount = lastReceived_,
+        .contactCount = context.lastExpected,
+        .receivedCount = context.lastReceived,
         .remainingCount = context.remainingContacts,
-        .frameSync = lastFrameSync_,
+        .frameSync = context.lastFrameSync,
         .timestamp = timestamp,
+        .geometry = context.geometry,
     };
 
     std::array<bool, 256> currentActive{};
     for (size_t id = 0; id < kMaxTrackedContacts; ++id)
     {
-        if (!activeFingerIds_[id])
+        if (!context.activeFingerIds[id])
         {
             continue;
         }
 
-        const Finger& finger = activeFingers_[id];
+        const Finger& finger = context.activeFingers[id];
         if (!finger.pressed)
         {
-            TouchPoint point = previousPoints_[id].active
-                ? previousPoints_[id]
+            TouchPoint point = context.previousPoints[id].active
+                ? context.previousPoints[id]
                 : TouchPoint{.contactId = static_cast<DWORD>(id)};
             point.active = false;
             point.state = PointState::Released;
@@ -474,16 +741,16 @@ RawTouchInput::Frame RawTouchInput::BuildFrame(DeviceContext& context, std::int6
             point.height = finger.height;
             point.timestamp = finger.timestamp;
             frame.points.push_back(point);
-            previousPoints_[id] = {};
-            activeFingerIds_[id] = false;
-            activeFingers_[id] = {};
+            context.previousPoints[id] = {};
+            context.activeFingerIds[id] = false;
+            context.activeFingers[id] = {};
             continue;
         }
 
         TouchPoint point{
             .contactId = static_cast<DWORD>(id),
             .active = true,
-            .state = previousPoints_[id].active ? PointState::Moved : PointState::Pressed,
+            .state = context.previousPoints[id].active ? PointState::Moved : PointState::Pressed,
             .x = finger.x,
             .y = finger.y,
             .width = finger.width,
@@ -491,25 +758,25 @@ RawTouchInput::Frame RawTouchInput::BuildFrame(DeviceContext& context, std::int6
             .timestamp = finger.timestamp,
         };
         currentActive[id] = true;
-        previousPoints_[id] = point;
+        context.previousPoints[id] = point;
         frame.points.push_back(point);
     }
 
-    if (lastFrameSync_)
+    if (context.lastFrameSync)
     {
         for (size_t id = 0; id < kMaxTrackedContacts; ++id)
         {
-            if (!previousPoints_[id].active || currentActive[id])
+            if (!context.previousPoints[id].active || currentActive[id])
             {
                 continue;
             }
 
-            TouchPoint point = previousPoints_[id];
+            TouchPoint point = context.previousPoints[id];
             point.active = false;
             point.state = PointState::Released;
             point.timestamp = timestamp;
             frame.points.push_back(point);
-            previousPoints_[id] = {};
+            context.previousPoints[id] = {};
         }
     }
 
@@ -521,35 +788,36 @@ RawTouchInput::Frame RawTouchInput::BuildReleaseAllFrame(DeviceContext& context,
     Frame frame{
         .device = context.device,
         .contactCount = 0,
-        .receivedCount = lastReceived_,
+        .receivedCount = context.lastReceived,
         .remainingCount = 0,
-        .frameSync = lastFrameSync_,
+        .frameSync = context.lastFrameSync,
         .timestamp = timestamp,
+        .geometry = context.geometry,
     };
 
     for (size_t id = 0; id < kMaxTrackedContacts; ++id)
     {
-        if (!previousPoints_[id].active)
+        if (!context.previousPoints[id].active)
         {
             continue;
         }
 
-        TouchPoint point = previousPoints_[id];
+        TouchPoint point = context.previousPoints[id];
         point.active = false;
         point.state = PointState::Released;
         point.timestamp = timestamp;
         frame.points.push_back(point);
-        previousPoints_[id] = {};
+        context.previousPoints[id] = {};
     }
 
-    ClearActiveFingers();
+    ClearActiveFingers(context);
     return frame;
 }
 
-void RawTouchInput::ClearActiveFingers()
+void RawTouchInput::ClearActiveFingers(DeviceContext& context)
 {
-    std::fill(activeFingers_.begin(), activeFingers_.end(), Finger{});
-    std::fill(activeFingerIds_.begin(), activeFingerIds_.end(), false);
+    std::fill(context.activeFingers.begin(), context.activeFingers.end(), Finger{});
+    std::fill(context.activeFingerIds.begin(), context.activeFingerIds.end(), false);
 }
 
 ULONG RawTouchInput::GetUsageValue(

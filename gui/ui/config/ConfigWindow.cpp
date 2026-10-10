@@ -1,21 +1,21 @@
 #include "ui/config/ConfigWindow.h"
 
 #include "common/AppSettings.h"
+#include "common/AutoStart.h"
 #include "common/FileUtils.h"
 #include "common/PathUtils.h"
+#include "common/PdbCache.h"
+#include "common/RegistryUtils.h"
+#include "common/Win32Error.h"
+#include "hook/HookController.h"
+#include "ui/shared/AppIcon.h"
 
 #include <dwmapi.h>
+#include <shellapi.h>
+#include <shlobj.h>
 #include <windowsx.h>
-#include <commctrl.h>
-#pragma comment(lib, "comctl32.lib")
 
 #pragma comment(lib, "dwmapi.lib")
-
-#if defined(TOUCHREV_BUILD_BLOCKER)
-#include "injector/inject.h"
-#include "injector/process_find.h"
-#include "common/winutil.h"
-#endif
 
 #include <winrt/base.h>
 #include <winrt/Windows.Foundation.h>
@@ -24,18 +24,22 @@
 #include <winrt/Windows.UI.Xaml.Controls.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
 #include <winrt/Windows.UI.Xaml.Controls.Primitives.h>
+#include <winrt/Windows.Devices.Input.h>
 #include <winrt/Windows.UI.Input.h>
 #include <winrt/Windows.UI.Xaml.Input.h>
+#include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Xaml.Shapes.h>
-
-#include <tlhelp32.h>
 
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace
 {
-constexpr wchar_t kWindowTitle[] = L"Touch-Rev 配置";
+constexpr wchar_t kWindowTitle[] = L"Touch-Rev 控制中心";
+constexpr int kClientWidthDip = 520;
+constexpr int kClientHeightDip = 660;
+constexpr UINT_PTR kRefreshTimerId = 1;
 
 constexpr DWORD kPdbStatusNone = 0;
 constexpr DWORD kPdbStatusResolving = 1;
@@ -69,8 +73,6 @@ struct BlockerRuntimeStatus {
     DWORD hookStatus = kHookStatusNone;
     DWORD pdbLastError = ERROR_SUCCESS;
     DWORD hookLastError = ERROR_SUCCESS;
-    std::wstring pdbLastEvent;
-    std::wstring hookLastEvent;
 };
 
 winrt::Windows::UI::Color StatusColor(bool isDark, StatusVisual visual)
@@ -96,63 +98,17 @@ winrt::Windows::UI::Color StatusColor(bool isDark, StatusVisual visual)
     }
 }
 
-void SetStatusText(const winrt::Windows::UI::Xaml::Controls::TextBlock& textBlock,
-                   std::wstring_view text,
-                   bool isDark,
-                   StatusVisual visual)
-{
-    textBlock.Text(winrt::hstring{text});
-    textBlock.Foreground(winrt::Windows::UI::Xaml::Media::SolidColorBrush(
-        StatusColor(isDark, visual)));
-}
-
-DWORD ReadRegistryDword(HKEY key, PCWSTR name, DWORD fallback)
-{
-    DWORD value = fallback;
-    DWORD type = 0;
-    DWORD size = sizeof(value);
-    if (RegQueryValueExW(key, name, nullptr, &type,
-                         reinterpret_cast<LPBYTE>(&value), &size) != ERROR_SUCCESS ||
-        type != REG_DWORD || size != sizeof(value))
-    {
-        return fallback;
-    }
-    return value;
-}
-
-std::wstring ReadRegistryString(HKEY key, PCWSTR name)
-{
-    wchar_t buffer[512]{};
-    DWORD type = 0;
-    DWORD size = sizeof(buffer);
-    if (RegQueryValueExW(key, name, nullptr, &type,
-                         reinterpret_cast<LPBYTE>(buffer), &size) != ERROR_SUCCESS ||
-        type != REG_SZ)
-    {
-        return {};
-    }
-    buffer[ARRAYSIZE(buffer) - 1] = L'\0';
-    return buffer;
-}
-
 BlockerRuntimeStatus ReadBlockerRuntimeStatus()
 {
-    BlockerRuntimeStatus status{};
-    HKEY key = nullptr;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Touch-Rev", 0,
-                      KEY_READ, &key) != ERROR_SUCCESS)
-    {
-        return status;
-    }
+    namespace registry = touchrev::common::registry;
+    constexpr wchar_t kStatusKey[] = L"Software\\Touch-Rev";
 
-    status.pdbStatus = ReadRegistryDword(key, L"PdbStatus", kPdbStatusNone);
-    status.pdbSource = ReadRegistryDword(key, L"PdbSource", kPdbSourceNone);
-    status.hookStatus = ReadRegistryDword(key, L"HookStatus", kHookStatusNone);
-    status.pdbLastError = ReadRegistryDword(key, L"PdbLastError", ERROR_SUCCESS);
-    status.hookLastError = ReadRegistryDword(key, L"HookLastError", ERROR_SUCCESS);
-    status.pdbLastEvent = ReadRegistryString(key, L"PdbLastEvent");
-    status.hookLastEvent = ReadRegistryString(key, L"HookLastEvent");
-    RegCloseKey(key);
+    BlockerRuntimeStatus status{};
+    status.pdbStatus = registry::ReadDword(HKEY_CURRENT_USER, kStatusKey, L"PdbStatus", kPdbStatusNone);
+    status.pdbSource = registry::ReadDword(HKEY_CURRENT_USER, kStatusKey, L"PdbSource", kPdbSourceNone);
+    status.hookStatus = registry::ReadDword(HKEY_CURRENT_USER, kStatusKey, L"HookStatus", kHookStatusNone);
+    status.pdbLastError = registry::ReadDword(HKEY_CURRENT_USER, kStatusKey, L"PdbLastError", ERROR_SUCCESS);
+    status.hookLastError = registry::ReadDword(HKEY_CURRENT_USER, kStatusKey, L"HookLastError", ERROR_SUCCESS);
     return status;
 }
 
@@ -170,6 +126,60 @@ std::wstring PdbSourceText(DWORD source)
     default:
         return L"未知来源";
     }
+}
+
+// 依据 PDB / Hook 两级状态给出面向用户的一句话结论与指示灯颜色。
+std::pair<std::wstring, StatusVisual> DescribeStatus(bool hookLoaded)
+{
+    if (!hookLoaded)
+    {
+        return {L"运行状态：未拦截系统默认手势", StatusVisual::Gray};
+    }
+
+    const BlockerRuntimeStatus status = ReadBlockerRuntimeStatus();
+    switch (status.pdbStatus)
+    {
+    case kPdbStatusDownloadFailed:
+        return {L"运行状态：无法下载 PDB 符号，拦截已失效", StatusVisual::Red};
+    case kPdbStatusIdentityMismatch:
+        return {L"运行状态：PDB identity 不匹配或缓存损坏，等待重新下载", StatusVisual::Yellow};
+    case kPdbStatusResolving:
+        if (status.pdbSource == kPdbSourceCache)
+        {
+            return {L"运行状态：正在加载本地 PDB 缓存...", StatusVisual::Yellow};
+        }
+        if (status.pdbSource == kPdbSourceDownload)
+        {
+            return {L"运行状态：PDB 符号下载中...", StatusVisual::Yellow};
+        }
+        return {L"运行状态：正在解析 PDB 符号...", StatusVisual::Blue};
+    default:
+        break;
+    }
+
+    switch (status.hookStatus)
+    {
+    case kHookStatusSymbolResolveFailed:
+        return {L"运行状态：PDB 已加载，但手势表 data symbol 未解析", StatusVisual::Red};
+    case kHookStatusRangeValidationFailed:
+        return {L"运行状态：PDB 已加载，但手势表区间校验失败", StatusVisual::Red};
+    case kHookStatusNoMatchingEntries:
+        return {L"运行状态：PDB 已加载，但未找到可屏蔽的三指表项", StatusVisual::Red};
+    case kHookStatusWriteFailed:
+        return {L"运行状态：手势表 patch 写入失败，拦截已失效", StatusVisual::Red};
+    case kHookStatusInstalled:
+        return {L"运行状态：已拦截 Windows 默认手势 (PDB: " + PdbSourceText(status.pdbSource) + L")",
+                StatusVisual::Green};
+    default:
+        break;
+    }
+
+    if (status.pdbStatus == kPdbStatusLoaded)
+    {
+        return {L"运行状态：PDB 已加载 (" + PdbSourceText(status.pdbSource) + L")，Hook 初始化中...",
+                StatusVisual::Blue};
+    }
+    return {L"运行状态：已注入拦截模块，正在初始化...", StatusVisual::Blue};
 }
 
 bool AppendThemeResources(winrt::Windows::UI::Xaml::ResourceDictionary const& resources)
@@ -193,6 +203,13 @@ bool AppendThemeResources(winrt::Windows::UI::Xaml::ResourceDictionary const& re
         return false;
     }
 }
+
+template <typename T>
+T FindElement(winrt::Windows::UI::Xaml::Controls::Grid const& root, PCWSTR name)
+{
+    auto element = root.FindName(name);
+    return element ? element.try_as<T>() : T{nullptr};
+}
 }
 
 bool ConfigWindow::Initialize(HINSTANCE instance, int showCommand)
@@ -203,36 +220,27 @@ bool ConfigWindow::Initialize(HINSTANCE instance, int showCommand)
     windowClass.cbSize = sizeof(windowClass);
     windowClass.style = CS_HREDRAW | CS_VREDRAW;
     windowClass.lpfnWndProc = ConfigWindow::WindowProc;
-    windowClass.cbClsExtra = 0;
-    windowClass.cbWndExtra = 0;
     windowClass.hInstance = instance_;
-    windowClass.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+    windowClass.hIcon = touchrev::ui::CreateAppIcon(GetSystemMetrics(SM_CXICON));
     windowClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     windowClass.hbrBackground = nullptr;
-    windowClass.lpszMenuName = nullptr;
     windowClass.lpszClassName = ConfigWindow::WindowClassName;
-    windowClass.hIconSm = LoadIconW(nullptr, IDI_APPLICATION);
-
-    // 如果未注册则进行注册
+    windowClass.hIconSm = touchrev::ui::CreateAppIcon(GetSystemMetrics(SM_CXSMICON));
     RegisterClassExW(&windowClass);
 
-    // 获取系统 DPI 并缩放 460x490 的精致窗口
     const UINT dpi = GetDpiForSystem();
-    const int clientWidth = MulDiv(460, dpi, 96);
-    const int clientHeight = MulDiv(490, dpi, 96);
+    const SIZE clientSize = ClientSizePx(dpi);
 
-    // 使用标准的 Win32 窗口样式，但禁用最大化按钮（我们限死了窗口大小）
+    // 固定尺寸窗口：保留 WS_THICKFRAME 只为拿到 DWM 的阴影与圆角，实际尺寸由 WM_GETMINMAXINFO 锁死。
     constexpr DWORD style = WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX;
 
-    RECT rect = { 0, 0, clientWidth, clientHeight };
+    RECT rect = {0, 0, clientSize.cx, clientSize.cy};
     AdjustWindowRectExForDpi(&rect, style, FALSE, 0, dpi);
     const int width = rect.right - rect.left;
     const int height = rect.bottom - rect.top;
 
-    const int screenWidth = GetSystemMetrics(SM_CXSCREEN);
-    const int screenHeight = GetSystemMetrics(SM_CYSCREEN);
-    const int x = (screenWidth - width) / 2;
-    const int y = (screenHeight - height) / 2;
+    const int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
+    const int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
 
     hwnd_ = CreateWindowExW(
         0,
@@ -253,28 +261,45 @@ bool ConfigWindow::Initialize(HINSTANCE instance, int showCommand)
         return false;
     }
 
-    themeManager_.Initialize(hwnd_, true);
+    themeManager_.Initialize(hwnd_, WindowBackdrop::Mica, true);
     UpdateXamlTheme();
 
-    ShowWindow(hwnd_, showCommand);
-    UpdateWindow(hwnd_);
+    // 客户区已经改写，强制重算一次非客户区，让标题栏立即并入客户区。
+    SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    if (showCommand != SW_HIDE)
+    {
+        Show();
+    }
     return true;
+}
+
+SIZE ConfigWindow::ClientSizePx(UINT dpi) const
+{
+    return SIZE{MulDiv(kClientWidthDip, dpi, 96), MulDiv(kClientHeightDip, dpi, 96)};
 }
 
 void ConfigWindow::Show()
 {
-    if (hwnd_)
+    if (!hwnd_)
     {
-        ShowWindow(hwnd_, SW_SHOW);
-        SetForegroundWindow(hwnd_);
-        SyncConfigToUi();
+        return;
     }
+
+    ShowWindow(hwnd_, SW_SHOW);
+    SetForegroundWindow(hwnd_);
+    SyncConfigToUi();
+    RefreshAutoStartUi();
+    RefreshPdbCacheUi();
+    SetTimer(hwnd_, kRefreshTimerId, 1000, nullptr);
 }
 
 void ConfigWindow::Hide()
 {
     if (hwnd_)
     {
+        KillTimer(hwnd_, kRefreshTimerId);
         ShowWindow(hwnd_, SW_HIDE);
     }
 }
@@ -298,42 +323,52 @@ LRESULT CALLBACK ConfigWindow::WindowProc(HWND hwnd, UINT message, WPARAM wParam
     return DefWindowProcW(hwnd, message, wParam, lParam);
 }
 
-
-
 LRESULT ConfigWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
 {
-
-
     switch (message)
     {
-    case WM_SETTINGCHANGE:
-        if (lParam && wcscmp(reinterpret_cast<LPCWSTR>(lParam), L"Registry") == 0)
+    case WM_NCCALCSIZE:
+    {
+        if (wParam != TRUE)
         {
-            if (themeManager_.Refresh(hwnd_))
-            {
-                UpdateXamlTheme();
-            }
+            break;
+        }
+
+        // 沉浸式标题栏：让 DefWindowProc 算出左右下的边框内缩，再把顶边还原回窗口边缘，
+        // 于是原本的 caption 区域并入客户区，由 XAML 自绘标题栏填充。
+        auto* params = reinterpret_cast<NCCALCSIZE_PARAMS*>(lParam);
+        const LONG originalTop = params->rgrc[0].top;
+        const LRESULT result = DefWindowProcW(hwnd_, message, wParam, lParam);
+        params->rgrc[0].top = originalTop;
+        return result;
+    }
+
+    case WM_SETTINGCHANGE:
+        if (themeManager_.Refresh(hwnd_))
+        {
+            UpdateXamlTheme();
         }
         return 0;
 
     case WM_GETMINMAXINFO:
+    {
+        if (!hwnd_)
         {
-            auto* mmi = reinterpret_cast<MINMAXINFO*>(lParam);
-            const UINT dpi = GetDpiForWindow(hwnd_);
-            const int clientWidth = MulDiv(460, dpi, 96);
-            const int clientHeight = MulDiv(490, dpi, 96);
-
-            RECT rect = { 0, 0, clientWidth, clientHeight };
-            AdjustWindowRectExForDpi(&rect, GetWindowLongW(hwnd_, GWL_STYLE), FALSE, GetWindowLongW(hwnd_, GWL_EXSTYLE), dpi);
-            const int width = rect.right - rect.left;
-            const int height = rect.bottom - rect.top;
-
-            mmi->ptMinTrackSize.x = width;
-            mmi->ptMinTrackSize.y = height;
-            mmi->ptMaxTrackSize.x = width;
-            mmi->ptMaxTrackSize.y = height;
-            return 0;
+            break;
         }
+
+        auto* minMaxInfo = reinterpret_cast<MINMAXINFO*>(lParam);
+        const UINT dpi = GetDpiForWindow(hwnd_);
+        const SIZE clientSize = ClientSizePx(dpi);
+
+        RECT rect = {0, 0, clientSize.cx, clientSize.cy};
+        AdjustWindowRectExForDpi(&rect, GetWindowLongW(hwnd_, GWL_STYLE), FALSE,
+                                 GetWindowLongW(hwnd_, GWL_EXSTYLE), dpi);
+        minMaxInfo->ptMinTrackSize.x = rect.right - rect.left;
+        minMaxInfo->ptMinTrackSize.y = rect.bottom - rect.top;
+        minMaxInfo->ptMaxTrackSize = minMaxInfo->ptMinTrackSize;
+        return 0;
+    }
 
     case WM_CREATE:
         if (FAILED(OnCreate()))
@@ -374,12 +409,12 @@ LRESULT ConfigWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
     }
 
     case WM_CLOSE:
-        // 用户点击关闭按钮，仅隐藏配置窗口，不退出应用
+        // 关闭按钮只收起窗口，应用继续驻留托盘。
         Hide();
         return 0;
 
     case WM_TIMER:
-        if (wParam == 1)
+        if (wParam == kRefreshTimerId)
         {
             if (themeManager_.Refresh(hwnd_))
             {
@@ -401,12 +436,21 @@ HRESULT ConfigWindow::OnCreate()
 {
     try
     {
+        using namespace winrt::Windows::UI::Xaml;
         using namespace winrt::Windows::UI::Xaml::Hosting;
         using namespace winrt::Windows::UI::Xaml::Markup;
 
-        // 初始化局部的 XAML Island 宿主
         xamlManager_ = WindowsXamlManager::InitializeForCurrentThread();
         xamlSource_ = DesktopWindowXamlSource();
+
+        // 不打开 island 透明，Mica 会被子窗口的不透明位面整块盖住。
+        // 这是私有接口，系统更新后可能不可用，失败时在 UpdateXamlTheme 里退化为主题底色。
+        const HRESULT transparencyHr = touchrev::common::xaml::EnableIslandTransparency();
+        islandTransparent_ = SUCCEEDED(transparencyHr);
+        if (!islandTransparent_)
+        {
+            DebugLogHResult(L"ConfigWindow IXamlSourceTransparency", transparencyHr);
+        }
 
         winrt::com_ptr<IDesktopWindowXamlSourceNative> nativeSource;
         auto* xamlSourceAbi = reinterpret_cast<IUnknown*>(winrt::get_abi(xamlSource_));
@@ -428,28 +472,14 @@ HRESULT ConfigWindow::OnCreate()
             return hr;
         }
 
-
-
-        // 开启窗口 Mica 材质与沉浸式扩展
-        MARGINS margins = { -1, -1, -1, -1 };
-        ::DwmExtendFrameIntoClientArea(hwnd_, &margins);
-
-        #if defined(DWMWA_SYSTEMBACKDROP_TYPE)
-        constexpr DWORD kDwmwaSystemBackdropType = DWMWA_SYSTEMBACKDROP_TYPE;
-        #else
-        constexpr DWORD kDwmwaSystemBackdropType = 38;
-        #endif
-        DWORD backdropType = 2; // Mica
-        ::DwmSetWindowAttribute(hwnd_, kDwmwaSystemBackdropType, &backdropType, sizeof(backdropType));
-
         // 隐式实例化全局 Application 对象，以支持所有局部 XAML 在反序列化时的全局主题资源查询
         try
         {
-            if (!winrt::Windows::UI::Xaml::Application::Current())
+            if (!Application::Current())
             {
-                auto app = winrt::Windows::UI::Xaml::Application();
+                auto app = Application();
             }
-            auto currentApp = winrt::Windows::UI::Xaml::Application::Current();
+            auto currentApp = Application::Current();
             if (currentApp)
             {
                 AppendThemeResources(currentApp.Resources());
@@ -459,7 +489,6 @@ HRESULT ConfigWindow::OnCreate()
         {
         }
 
-        // 加载 ConfigRoot.xaml
         const std::wstring xaml = touchrev::common::LoadTextFileUtf8(
             touchrev::common::ModuleRelativePath(L"xaml/ConfigRoot.xaml"));
         if (xaml.empty())
@@ -467,36 +496,144 @@ HRESULT ConfigWindow::OnCreate()
             return E_FAIL;
         }
 
-        auto object = XamlReader::Load(winrt::hstring{xaml});
-        auto root = object.as<winrt::Windows::UI::Xaml::Controls::Grid>();
+        auto root = XamlReader::Load(winrt::hstring{xaml}).as<Controls::Grid>();
         root_ = root;
         UpdateXamlTheme();
         xamlSource_.Content(root_);
 
-        // 检索 XAML 中的配置控件与状态栏
-        hookStatusText_ = root.FindName(L"HookStatusText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
-        statusIndicatorDot_ = root.FindName(L"StatusIndicatorDot").as<winrt::Windows::UI::Xaml::Shapes::Ellipse>();
+        titleBar_ = FindElement<Controls::Grid>(root, L"TitleBar");
+        minimizeButton_ = FindElement<Controls::Button>(root, L"MinimizeButton");
+        closeButton_ = FindElement<Controls::Button>(root, L"CloseButton");
 
-        // 检索 XAML 中的配置控件
-        hookToggle_ = root.FindName(L"HookToggle").as<winrt::Windows::UI::Xaml::Controls::ToggleSwitch>();
-        gestureToggle_ = root.FindName(L"GestureToggle").as<winrt::Windows::UI::Xaml::Controls::ToggleSwitch>();
-        windowToggle_ = root.FindName(L"WindowToggle").as<winrt::Windows::UI::Xaml::Controls::ToggleSwitch>();
-        exitButton_ = root.FindName(L"ExitButton").as<winrt::Windows::UI::Xaml::Controls::Button>();
+        hookStatusText_ = FindElement<Controls::TextBlock>(root, L"HookStatusText");
+        statusIndicatorDot_ = FindElement<Shapes::Ellipse>(root, L"StatusIndicatorDot");
 
+        hookToggle_ = FindElement<Controls::ToggleSwitch>(root, L"HookToggle");
+        gestureToggle_ = FindElement<Controls::ToggleSwitch>(root, L"GestureToggle");
+        windowToggle_ = FindElement<Controls::ToggleSwitch>(root, L"WindowToggle");
+        autoStartToggle_ = FindElement<Controls::ToggleSwitch>(root, L"AutoStartToggle");
+        autoInstallToggle_ = FindElement<Controls::ToggleSwitch>(root, L"AutoInstallToggle");
+        autoStartDescription_ = FindElement<Controls::TextBlock>(root, L"AutoStartDescription");
+        pdbCacheDescription_ = FindElement<Controls::TextBlock>(root, L"PdbCacheDescription");
+        clearCacheButton_ = FindElement<Controls::Button>(root, L"ClearCacheButton");
+        openCacheFolderButton_ = FindElement<Controls::Button>(root, L"OpenCacheFolderButton");
+        exitButton_ = FindElement<Controls::Button>(root, L"ExitButton");
 
+        if (titleBar_)
+        {
+            // island 吞掉全部命中测试，标题栏拖动只能在 XAML 侧实现。
+            // 不用 WM_NCLBUTTONDOWN(HTCAPTION)：island 收到的是 WM_POINTER，触摸/笔按下时系统移动循环
+            // 看不到鼠标左键按下会立刻退出。这里自己捕获指针，按屏幕坐标位移窗口，三种输入走同一路径。
+            // 必须用与窗口位置无关的屏幕绝对坐标：若用"island 相对坐标 + 客户区原点"，窗口一移动原点就变，
+            // 而排队中的指针事件仍是按旧位置算的相对坐标，两者错位会让窗口来回跳。
+            const auto toScreen = [](winrt::Windows::UI::Xaml::Input::Pointer const& pointer) {
+                POINT screen{};
+                if (pointer.PointerDeviceType() != winrt::Windows::Devices::Input::PointerDeviceType::Mouse)
+                {
+                    POINTER_INFO info{};
+                    if (GetPointerInfo(pointer.PointerId(), &info))
+                    {
+                        return info.ptPixelLocation;
+                    }
+                }
+                GetCursorPos(&screen);
+                return screen;
+            };
 
-        // 同步当前的配置状态到 UI
+            titleBar_.PointerPressed([this, toScreen](auto const&, Input::PointerRoutedEventArgs const& args) {
+                const auto point = args.GetCurrentPoint(nullptr);
+                if (point.PointerDevice().PointerDeviceType() ==
+                        winrt::Windows::Devices::Input::PointerDeviceType::Mouse &&
+                    !point.Properties().IsLeftButtonPressed())
+                {
+                    return;
+                }
+
+                RECT windowRect{};
+                if (!GetWindowRect(hwnd_, &windowRect) || !titleBar_.CapturePointer(args.Pointer()))
+                {
+                    return;
+                }
+
+                titleDragging_ = true;
+                titleDragPointerId_ = args.Pointer().PointerId();
+                titleDragStartScreen_ = toScreen(args.Pointer());
+                titleDragStartWindow_ = {windowRect.left, windowRect.top};
+                args.Handled(true);
+            });
+
+            titleBar_.PointerMoved([this, toScreen](auto const&, Input::PointerRoutedEventArgs const& args) {
+                if (!titleDragging_ || args.Pointer().PointerId() != titleDragPointerId_)
+                {
+                    return;
+                }
+
+                const POINT current = toScreen(args.Pointer());
+                SetWindowPos(hwnd_,
+                             nullptr,
+                             titleDragStartWindow_.x + (current.x - titleDragStartScreen_.x),
+                             titleDragStartWindow_.y + (current.y - titleDragStartScreen_.y),
+                             0,
+                             0,
+                             SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+                args.Handled(true);
+            });
+
+            const auto endDrag = [this](auto const&, Input::PointerRoutedEventArgs const& args) {
+                if (!titleDragging_ || args.Pointer().PointerId() != titleDragPointerId_)
+                {
+                    return;
+                }
+                titleDragging_ = false;
+                titleBar_.ReleasePointerCapture(args.Pointer());
+                args.Handled(true);
+            };
+            titleBar_.PointerReleased(endDrag);
+            titleBar_.PointerCanceled(endDrag);
+            titleBar_.PointerCaptureLost([this](auto const&, Input::PointerRoutedEventArgs const&) {
+                titleDragging_ = false;
+            });
+        }
+
+        if (minimizeButton_)
+        {
+            minimizeButton_.Click([this](auto const&, auto const&) {
+                ShowWindow(hwnd_, SW_MINIMIZE);
+            });
+        }
+
+        if (closeButton_)
+        {
+            closeButton_.Click([this](auto const&, auto const&) {
+                Hide();
+            });
+        }
+
         SyncConfigToUi();
+        RefreshAutoStartUi();
+        RefreshPdbCacheUi();
 
-        // 绑定事件处理器，防振荡和死循环
         if (hookToggle_)
         {
             hookToggle_.Toggled([this](auto const&, auto const&) {
-                if (isTogglingHook_) return;
-                const bool target = hookToggle_.IsOn();
-                if (target != QueryHookStatus())
+                if (isSyncingUi_)
                 {
-                    ToggleHook(target);
+                    return;
+                }
+                const bool target = hookToggle_.IsOn();
+                if (!hook_ || target == hook_->IsEffective())
+                {
+                    return;
+                }
+                // 注入/卸载在后台进行，期间开关置灰；被拒绝时回填会把开关拨回去，并说明原因。
+                const bool accepted = target ? hook_->RequestEnable(true) : hook_->RequestDisable(true);
+                SyncConfigToUi();
+                if (!accepted)
+                {
+                    MessageBoxW(hwnd_,
+                                hook_->IsBusy() ? L"上一个拦截操作仍在进行，请稍候。"
+                                                : L"拦截模块控制器未就绪，无法执行操作。",
+                                L"Touch-Rev", MB_OK | MB_ICONWARNING);
                 }
             });
         }
@@ -504,29 +641,95 @@ HRESULT ConfigWindow::OnCreate()
         if (gestureToggle_)
         {
             gestureToggle_.Toggled([this](auto const&, auto const&) {
-                touchrev::settings::g_IsGestureEnabled = gestureToggle_.IsOn();
+                if (isSyncingUi_)
+                {
+                    return;
+                }
+                touchrev::settings::SetGestureEnabled(gestureToggle_.IsOn());
             });
         }
 
         if (windowToggle_)
         {
             windowToggle_.Toggled([this](auto const&, auto const&) {
-                touchrev::settings::g_IsSwitcherWindowEnabled = windowToggle_.IsOn();
+                if (isSyncingUi_)
+                {
+                    return;
+                }
+                touchrev::settings::SetSwitcherWindowEnabled(windowToggle_.IsOn());
+            });
+        }
+
+        if (autoInstallToggle_)
+        {
+            autoInstallToggle_.Toggled([this](auto const&, auto const&) {
+                if (isSyncingUi_)
+                {
+                    return;
+                }
+                touchrev::settings::SetHookAutoInstall(autoInstallToggle_.IsOn());
+            });
+        }
+
+        if (autoStartToggle_)
+        {
+            autoStartToggle_.Toggled([this](auto const&, auto const&) {
+                if (isSyncingUi_)
+                {
+                    return;
+                }
+
+                DWORD error = ERROR_SUCCESS;
+                if (!touchrev::common::autostart::SetEnabled(autoStartToggle_.IsOn(), &error))
+                {
+                    MessageBoxW(hwnd_, L"写入开机启动项失败。", L"Touch-Rev", MB_OK | MB_ICONERROR);
+                }
+                RefreshAutoStartUi();
+            });
+        }
+
+        if (clearCacheButton_)
+        {
+            clearCacheButton_.Click([this](auto const&, auto const&) {
+                // 拦截运行中时会先关闭、清理、再重新启用；结果由完成回调提示。
+                if (hook_)
+                {
+                    hook_->RequestClearCache(true);
+                }
+                SyncConfigToUi();
+            });
+        }
+
+        if (openCacheFolderButton_)
+        {
+            openCacheFolderButton_.Click([this](auto const&, auto const&) {
+                const std::wstring root = touchrev::common::pdbcache::Root();
+                if (root.empty())
+                {
+                    return;
+                }
+                SHCreateDirectoryExW(nullptr, root.c_str(), nullptr);
+                ShellExecuteW(hwnd_, L"open", root.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             });
         }
 
         if (exitButton_)
         {
-            exitButton_.Click([](auto const&, auto const&) {
-                // 完全退出应用程序，通过发送退出消息退出消息循环
-                PostQuitMessage(0);
+            exitButton_.Click([this](auto const&, auto const&) {
+                if (MessageBoxW(hwnd_, L"退出后 Touch-Rev 的三指手势将停止工作，Windows 默认三指手势会恢复。确定退出吗？",
+                                L"Touch-Rev", MB_OKCANCEL | MB_ICONQUESTION) == IDOK &&
+                    exitCallback_)
+                {
+                    exitCallback_();
+                }
             });
         }
 
-        // 设置一秒的定时器，定时检测 Hook 状态
-        SetTimer(hwnd_, 1, 1000, nullptr);
+        // 托盘菜单改动配置后回填界面，两处开关状态始终一致。
+        settingsToken_ = touchrev::settings::Subscribe([this](const touchrev::settings::AppSettings&) {
+            SyncConfigToUi();
+        });
 
-        // 获取并调整 initial 坐标
         RECT client{};
         GetClientRect(hwnd_, &client);
         SetWindowPos(
@@ -538,8 +741,6 @@ HRESULT ConfigWindow::OnCreate()
             client.bottom - client.top,
             SWP_NOZORDER | SWP_SHOWWINDOW);
 
-
-
         return S_OK;
     }
     catch (const winrt::hresult_error& error)
@@ -550,14 +751,27 @@ HRESULT ConfigWindow::OnCreate()
 
 void ConfigWindow::OnDestroy()
 {
-    KillTimer(hwnd_, 1);
-    
-    // 清理 XAML 引用
+    KillTimer(hwnd_, kRefreshTimerId);
+    if (settingsToken_ != 0)
+    {
+        touchrev::settings::Unsubscribe(settingsToken_);
+        settingsToken_ = 0;
+    }
+
+    titleBar_ = nullptr;
+    minimizeButton_ = nullptr;
+    closeButton_ = nullptr;
     hookStatusText_ = nullptr;
     statusIndicatorDot_ = nullptr;
     hookToggle_ = nullptr;
     gestureToggle_ = nullptr;
     windowToggle_ = nullptr;
+    autoStartToggle_ = nullptr;
+    autoInstallToggle_ = nullptr;
+    autoStartDescription_ = nullptr;
+    pdbCacheDescription_ = nullptr;
+    clearCacheButton_ = nullptr;
+    openCacheFolderButton_ = nullptr;
     exitButton_ = nullptr;
 
     if (xamlSource_)
@@ -573,285 +787,134 @@ void ConfigWindow::OnDestroy()
 
 void ConfigWindow::SyncConfigToUi()
 {
-    // 用 isTogglingHook_ 标志作 UI 同步保护，防止触发 toggled 回调造成注入/反注入死循环
-    isTogglingHook_ = true;
-
-    const bool hookLoaded = QueryHookStatus();
-    if (hookToggle_ && hookToggle_.IsOn() != hookLoaded)
+    if (!root_)
     {
-        hookToggle_.IsOn(hookLoaded);
+        return;
     }
 
-    if (gestureToggle_ && gestureToggle_.IsOn() != touchrev::settings::g_IsGestureEnabled)
-    {
-        gestureToggle_.IsOn(touchrev::settings::g_IsGestureEnabled);
-    }
+    isSyncingUi_ = true;
 
-    if (windowToggle_ && windowToggle_.IsOn() != touchrev::settings::g_IsSwitcherWindowEnabled)
+    const auto& settings = touchrev::settings::Current();
+    const bool hookBusy = hook_ && hook_->IsBusy();
+    const bool hookLoaded = hook_ && hook_->IsModuleLoaded();
+    // 开关反映"拦截是否真正生效"：DLL 已加载但初始化失败时显示为关，用户再打开即可重试。
+    const bool hookEffective = hook_ && hook_->IsEffective();
+
+    if (hookToggle_)
     {
-        windowToggle_.IsOn(touchrev::settings::g_IsSwitcherWindowEnabled);
+        hookToggle_.IsEnabled(!hookBusy);
+        if (!hookBusy && hookToggle_.IsOn() != hookEffective)
+        {
+            hookToggle_.IsOn(hookEffective);
+        }
+    }
+    if (clearCacheButton_)
+    {
+        clearCacheButton_.IsEnabled(!hookBusy);
+    }
+    if (gestureToggle_ && gestureToggle_.IsOn() != settings.gestureEnabled)
+    {
+        gestureToggle_.IsOn(settings.gestureEnabled);
+    }
+    if (windowToggle_ && windowToggle_.IsOn() != settings.switcherWindowEnabled)
+    {
+        windowToggle_.IsOn(settings.switcherWindowEnabled);
+    }
+    if (autoInstallToggle_ && autoInstallToggle_.IsOn() != settings.hookAutoInstall)
+    {
+        autoInstallToggle_.IsOn(settings.hookAutoInstall);
     }
 
     if (hookStatusText_)
     {
-        const bool isDark = (themeManager_.Mode() == AppThemeMode::Dark);
-        StatusVisual visual = StatusVisual::Gray;
-        if (hookLoaded)
-        {
-            const BlockerRuntimeStatus status = ReadBlockerRuntimeStatus();
-            if (status.pdbStatus == kPdbStatusDownloadFailed)
-            {
-                visual = StatusVisual::Red;
-                SetStatusText(hookStatusText_, L"运行状态：无法下载 PDB 符号，拦截已失效", isDark, visual);
-            }
-            else if (status.pdbStatus == kPdbStatusIdentityMismatch)
-            {
-                visual = StatusVisual::Yellow;
-                SetStatusText(hookStatusText_, L"运行状态：PDB identity 不匹配或缓存损坏，等待重新下载", isDark, visual);
-            }
-            else if (status.pdbStatus == kPdbStatusResolving)
-            {
-                if (status.pdbSource == kPdbSourceCache)
-                {
-                    visual = StatusVisual::Yellow;
-                    SetStatusText(hookStatusText_, L"运行状态：正在加载本地 PDB 缓存...", isDark, visual);
-                }
-                else if (status.pdbSource == kPdbSourceDownload)
-                {
-                    visual = StatusVisual::Yellow;
-                    SetStatusText(hookStatusText_, L"运行状态：PDB 符号下载中...", isDark, visual);
-                }
-                else
-                {
-                    visual = StatusVisual::Blue;
-                    SetStatusText(hookStatusText_, L"运行状态：正在解析 PDB 符号...", isDark, visual);
-                }
-            }
-            else if (status.hookStatus == kHookStatusSymbolResolveFailed)
-            {
-                visual = StatusVisual::Red;
-                SetStatusText(hookStatusText_, L"运行状态：PDB 已加载，但手势表 data symbol 未解析", isDark, visual);
-            }
-            else if (status.hookStatus == kHookStatusRangeValidationFailed)
-            {
-                visual = StatusVisual::Red;
-                SetStatusText(hookStatusText_, L"运行状态：PDB 已加载，但手势表区间校验失败", isDark, visual);
-            }
-            else if (status.hookStatus == kHookStatusNoMatchingEntries)
-            {
-                visual = StatusVisual::Red;
-                SetStatusText(hookStatusText_, L"运行状态：PDB 已加载，但未找到可屏蔽的三指表项", isDark, visual);
-            }
-            else if (status.hookStatus == kHookStatusWriteFailed)
-            {
-                visual = StatusVisual::Red;
-                SetStatusText(hookStatusText_, L"运行状态：手势表 patch 写入失败，拦截已失效", isDark, visual);
-            }
-            else if (status.hookStatus == kHookStatusInstalled)
-            {
-                visual = StatusVisual::Green;
-                std::wstring text = L"运行状态：已拦截 Windows 默认手势 (PDB: " +
-                                    PdbSourceText(status.pdbSource) + L")";
-                SetStatusText(hookStatusText_, text, isDark, visual);
-            }
-            else if (status.pdbStatus == kPdbStatusLoaded)
-            {
-                visual = StatusVisual::Blue;
-                std::wstring text = L"运行状态：PDB 已加载 (" +
-                                    PdbSourceText(status.pdbSource) + L")，Hook 初始化中...";
-                SetStatusText(hookStatusText_, text, isDark, visual);
-            }
-            else
-            {
-                visual = StatusVisual::Blue;
-                SetStatusText(hookStatusText_, L"运行状态：已注入拦截模块，正在初始化...", isDark, visual);
-            }
-        }
-        else
-        {
-            visual = StatusVisual::Gray;
-            SetStatusText(hookStatusText_, L"运行状态：未拦截 (未注入)", isDark, visual);
-        }
-
+        const auto [text, visual] = hookBusy
+                                        ? std::pair<std::wstring, StatusVisual>{L"运行状态：正在处理拦截模块...", StatusVisual::Blue}
+                                        : DescribeStatus(hookLoaded);
+        const bool isDark = themeManager_.IsDark();
+        hookStatusText_.Text(winrt::hstring{text});
+        hookStatusText_.Foreground(
+            winrt::Windows::UI::Xaml::Media::SolidColorBrush(StatusColor(isDark, visual)));
         if (statusIndicatorDot_)
         {
-            statusIndicatorDot_.Fill(winrt::Windows::UI::Xaml::Media::SolidColorBrush(
-                StatusColor(isDark, visual)));
+            statusIndicatorDot_.Fill(
+                winrt::Windows::UI::Xaml::Media::SolidColorBrush(StatusColor(isDark, visual)));
         }
     }
 
-    isTogglingHook_ = false;
+    isSyncingUi_ = false;
 }
 
-void ConfigWindow::ToggleHook(bool enable)
+void ConfigWindow::RefreshAutoStartUi()
 {
-    isTogglingHook_ = true;
+    const auto state = touchrev::common::autostart::Query();
 
-#if defined(TOUCHREV_BUILD_BLOCKER)
-    std::wstring fullDllPath = touchrev::common::ModuleRelativePath(L"TouchRevBlockerHook.dll");
-
-    std::wstring error;
-    
-    // 1. 确认 DLL 文件存在
-    DWORD attributes = GetFileAttributesW(fullDllPath.c_str());
-    if (attributes == INVALID_FILE_ATTRIBUTES || (attributes & FILE_ATTRIBUTE_DIRECTORY))
+    isSyncingUi_ = true;
+    if (autoStartToggle_ && autoStartToggle_.IsOn() != state.enabled)
     {
-        MessageBoxW(hwnd_, (L"找不到 Hook DLL 文件:\n" + fullDllPath).c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
-        isTogglingHook_ = false;
+        autoStartToggle_.IsOn(state.enabled);
+    }
+    isSyncingUi_ = false;
+
+    if (!autoStartDescription_)
+    {
         return;
     }
 
-    // 2. 校验 DLL 机器架构类型
-    USHORT dllMachine = IMAGE_FILE_MACHINE_UNKNOWN;
-    if (!touchrev::GetPeMachineType(fullDllPath, &dllMachine))
+    if (state.blockedByTaskManager)
     {
-        MessageBoxW(hwnd_, L"读取 DLL PE 机器类型失败。", L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
-        isTogglingHook_ = false;
-        return;
+        autoStartDescription_.Text(L"已在任务管理器的\"启动\"页被禁用，重新打开开关即可恢复");
     }
-
-    if (dllMachine != touchrev::CurrentBuildMachineType())
+    else if (state.enabled)
     {
-        std::wstring msg = L"DLL 架构与当前构建架构不匹配。\n预期: " +
-                           std::wstring(touchrev::CurrentBuildArchName()) +
-                           L"\n实际: " + touchrev::MachineTypeToString(dllMachine);
-        MessageBoxW(hwnd_, msg.c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
-        isTogglingHook_ = false;
-        return;
-    }
-
-    // 3. 校验当前进程是否为 native
-    if (!touchrev::IsCurrentProcessNativeForCurrentBuild(&error))
-    {
-        MessageBoxW(hwnd_, (L"当前进程校验失败:\n" + error).c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
-        isTogglingHook_ = false;
-        return;
-    }
-
-    // 4. 查找资源管理器进程
-    touchrev::TargetProcess target;
-    if (!touchrev::FindShellExplorer(&target, &error))
-    {
-        MessageBoxW(hwnd_, (L"寻找资源管理器失败:\n" + error).c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
-        isTogglingHook_ = false;
-        return;
-    }
-
-    // 5. 校验目标进程架构是否匹配
-    if (!touchrev::IsNativeMachineForCurrentBuild(target.processMachine, target.nativeMachine))
-    {
-        std::wstring msg = L"目标 explorer.exe 架构与当前构建架构不匹配。\n预期: " +
-                           std::wstring(touchrev::CurrentBuildArchName()) +
-                           L"\n进程架构: " + touchrev::MachineTypeToString(target.processMachine) +
-                           L"\n原生架构: " + touchrev::MachineTypeToString(target.nativeMachine);
-        MessageBoxW(hwnd_, msg.c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
-        isTogglingHook_ = false;
-        return;
-    }
-
-    // 6. 查询 DLL 加载状态
-    touchrev::RemoteModuleInfo moduleInfo;
-    if (!touchrev::QueryRemoteDllModule(target.pid, fullDllPath, &moduleInfo, &error))
-    {
-        MessageBoxW(hwnd_, (L"查询模块状态失败:\n" + error).c_str(), L"Touch-Rev 错误", MB_OK | MB_ICONERROR);
-        isTogglingHook_ = false;
-        return;
-    }
-
-    if (enable)
-    {
-        // 安装 Hook
-        if (moduleInfo.module)
-        {
-            // DLL 已加载时仍显式发送 Start，以支持幂等启动和协议恢复。
-            if (!touchrev::StartHookInProcess(target.pid, fullDllPath,
-                                              moduleInfo.module, &error))
-            {
-                MessageBoxW(hwnd_, (L"启动 Hook DLL 失败:\n" + error).c_str(),
-                            L"Touch-Rev 启动失败", MB_OK | MB_ICONERROR);
-            }
-            isTogglingHook_ = false;
-            return;
-        }
-
-        HMODULE remoteModule = nullptr;
-        if (!touchrev::InjectDllIntoProcess(target.pid, fullDllPath, &remoteModule, &error))
-        {
-            MessageBoxW(hwnd_, (L"注入 Hook DLL 失败:\n" + error).c_str(), L"Touch-Rev 注入失败", MB_OK | MB_ICONERROR);
-        }
+        autoStartDescription_.Text(L"登录后静默驻留托盘，不弹出本窗口");
     }
     else
     {
-        // 卸载 Hook
-        if (!moduleInfo.module)
-        {
-            // 未加载，无需卸载
-            isTogglingHook_ = false;
-            return;
-        }
-
-        touchrev::RemoteModuleInfo unloadedModule;
-        DWORD freeLibraryResult = 0;
-        if (!touchrev::UninstallDllFromProcess(target.pid, fullDllPath, &unloadedModule, &freeLibraryResult, &error))
-        {
-            MessageBoxW(hwnd_, (L"卸载 Hook DLL 失败:\n" + error).c_str(), L"Touch-Rev 卸载失败", MB_OK | MB_ICONERROR);
-        }
+        autoStartDescription_.Text(L"开启后随 Windows 登录自动运行并驻留托盘");
     }
-
-#else
-    MessageBoxW(hwnd_, L"未启用 Blocker 构建，无法执行 Hook 操作。", L"Touch-Rev 提示", MB_OK | MB_ICONWARNING);
-#endif
-
-    isTogglingHook_ = false;
 }
 
-bool ConfigWindow::QueryHookStatus()
+void ConfigWindow::RefreshPdbCacheUi()
 {
-    HWND shellTray = FindWindowW(L"Shell_TrayWnd", nullptr);
-    if (!shellTray)
+    if (!pdbCacheDescription_)
     {
-        return false;
-    }
-    DWORD pid = 0;
-    GetWindowThreadProcessId(shellTray, &pid);
-    if (pid == 0)
-    {
-        return false;
+        return;
     }
 
-    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE | TH32CS_SNAPMODULE32, pid);
-    if (snapshot == INVALID_HANDLE_VALUE)
+    const auto usage = touchrev::common::pdbcache::QueryUsage();
+    if (!usage.exists || usage.fileCount == 0)
     {
-        return false;
+        pdbCacheDescription_.Text(L"缓存为空，启用拦截时会重新下载符号");
+        return;
     }
 
-    MODULEENTRY32W entry{};
-    entry.dwSize = sizeof(entry);
+    const std::wstring text = L"已占用 " + touchrev::common::pdbcache::FormatBytes(usage.totalBytes) +
+                              L"（" + std::to_wstring(usage.fileCount) + L" 个文件）；" +
+                              L"符号异常时清除可强制重新下载";
+    pdbCacheDescription_.Text(winrt::hstring{text});
+}
 
-    bool found = false;
-    if (Module32FirstW(snapshot, &entry))
-    {
-        do
-        {
-            if (_wcsicmp(entry.szModule, L"TouchRevHook.dll") == 0 ||
-                _wcsicmp(entry.szModule, L"TouchRevBlockerHook.dll") == 0)
-            {
-                found = true;
-                break;
-            }
-        } while (Module32NextW(snapshot, &entry));
-    }
-    CloseHandle(snapshot);
-    return found;
+void ConfigWindow::RefreshHookUi()
+{
+    SyncConfigToUi();
+    RefreshPdbCacheUi();
 }
 
 void ConfigWindow::UpdateXamlTheme()
 {
-    if (!root_) return;
+    if (!root_)
+    {
+        return;
+    }
+
     using namespace winrt::Windows::UI::Xaml;
-
-    const bool isDark = (themeManager_.Mode() == AppThemeMode::Dark);
-
-    // 设置 RequestedTheme，自动从合并的官方字典中刷新整个界面的色彩
+    const bool isDark = themeManager_.IsDark();
     root_.RequestedTheme(isDark ? ElementTheme::Dark : ElementTheme::Light);
+
+    // island 无法透明时 Mica 不可见，铺一层与 Mica 观感接近的主题底色，避免露出未定义的位面颜色。
+    if (!islandTransparent_)
+    {
+        root_.Background(Media::SolidColorBrush(isDark ? winrt::Windows::UI::Color{255, 0x20, 0x20, 0x20}
+                                                       : winrt::Windows::UI::Color{255, 0xF3, 0xF3, 0xF3}));
+    }
 }

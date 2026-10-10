@@ -7,24 +7,6 @@
 
 #include <algorithm>
 
-namespace
-{
-
-constexpr GUID kIXamlSourceTransparency = {
-    0x06636c29,
-    0x5a17,
-    0x458d,
-    {0x8e, 0xa2, 0x24, 0x22, 0xd9, 0x97, 0xa9, 0x22},
-};
-
-struct IXamlSourceTransparency : IInspectable
-{
-    virtual HRESULT STDMETHODCALLTYPE get_IsBackgroundTransparent(boolean* value) = 0;
-    virtual HRESULT STDMETHODCALLTYPE put_IsBackgroundTransparent(boolean value) = 0;
-};
-
-}
-
 bool ThinXamlAppSwitcherHost::Initialize(HWND parentHwnd)
 {
     if (initialized_)
@@ -40,20 +22,10 @@ bool ThinXamlAppSwitcherHost::Initialize(HWND parentHwnd)
         xamlManager_ = WindowsXamlManager::InitializeForCurrentThread();
         xamlSource_ = DesktopWindowXamlSource();
 
-        auto currentWindow = winrt::Windows::UI::Xaml::Window::Current();
-        if (currentWindow)
+        const HRESULT transparencyHr = touchrev::common::xaml::EnableIslandTransparency();
+        if (FAILED(transparencyHr))
         {
-            winrt::com_ptr<IXamlSourceTransparency> transparency;
-            auto* windowAbi = reinterpret_cast<IUnknown*>(winrt::get_abi(currentWindow));
-            HRESULT transparencyHr = windowAbi->QueryInterface(kIXamlSourceTransparency, transparency.put_void());
-            if (SUCCEEDED(transparencyHr) && transparency)
-            {
-                transparencyHr = transparency->put_IsBackgroundTransparent(true);
-            }
-            if (FAILED(transparencyHr))
-            {
-                DebugLogHResult(L"IXamlSourceTransparency::put_IsBackgroundTransparent", transparencyHr);
-            }
+            DebugLogHResult(L"IXamlSourceTransparency::put_IsBackgroundTransparent", transparencyHr);
         }
 
         winrt::com_ptr<IDesktopWindowXamlSourceNative> nativeSource;

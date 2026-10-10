@@ -39,6 +39,8 @@ public:
     winrt::Windows::UI::Xaml::Controls::Image appIcon{nullptr};
     winrt::Windows::UI::Xaml::Controls::Button closeButton{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border thumbnailHost{nullptr};
+    // 位于缩略图视觉之下；私有缩略图接口失败时显示说明文字，而不是一块空白卡片。
+    winrt::Windows::UI::Xaml::Controls::TextBlock thumbnailPlaceholder{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border pressOverlay{nullptr};
     HWND hwnd = nullptr;
     PointDip layoutPosition{};

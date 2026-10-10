@@ -21,6 +21,11 @@
             <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#55FFFFFF" />
             <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="#12FFFFFF" />
 
+            <!-- Mica 背板之上的分层填充：必须半透明，否则会把材质盖掉 -->
+            <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="#4C3A3A3A" />
+            <SolidColorBrush x:Key="SubtleFillColorSecondaryBrush" Color="#0FFFFFFF" />
+            <SolidColorBrush x:Key="SubtleFillColorTertiaryBrush" Color="#0AFFFFFF" />
+
             <SolidColorBrush x:Key="ControlAltFillColorSecondaryBrush" Color="#0DFFFFFF" />
             <SolidColorBrush x:Key="ControlAltFillColorTertiaryBrush" Color="#0BFFFFFF" />
             <SolidColorBrush x:Key="ControlAltFillColorQuarternaryBrush" Color="#12FFFFFF" />
@@ -69,6 +74,11 @@
             <SolidColorBrush x:Key="CardBackgroundFillColorDefaultBrush" Color="#FFFFFFFF" />
             <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#33000000" />
             <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="#0F000000" />
+
+            <!-- Mica 背板之上的分层填充：必须半透明，否则会把材质盖掉 -->
+            <SolidColorBrush x:Key="LayerFillColorDefaultBrush" Color="#B3FFFFFF" />
+            <SolidColorBrush x:Key="SubtleFillColorSecondaryBrush" Color="#09000000" />
+            <SolidColorBrush x:Key="SubtleFillColorTertiaryBrush" Color="#06000000" />
 
             <SolidColorBrush x:Key="ControlAltFillColorSecondaryBrush" Color="#06000000" />
             <SolidColorBrush x:Key="ControlAltFillColorTertiaryBrush" Color="#09000000" />

@@ -22,7 +22,7 @@ class ThreeFingerLongPressRecognizer
 public:
     bool Enabled = true;
     double LongPressDurationMs = 400.0;
-    double MaxStartMovement = 40.0;
+    double MaxStartMovement = 40.0;  // 0.1mm
 
     void OnBegin(const GestureContext& context);
     std::optional<GestureRecognitionResult> OnUpdate(const GestureContext& context);
@@ -55,8 +55,8 @@ public:
     double MaxTapDurationMs = 400.0;
     double MaxDoubleTapDelayMs = 450.0;
     double MinDoubleTapIntervalMs = 100.0;
-    double MovementThreshold = 30.0;
-    double DoubleTapDistance = 150.0;
+    double MovementThreshold = 30.0;   // 0.1mm
+    double DoubleTapDistance = 150.0;  // 0.1mm
 
     void OnBegin(const GestureContext& context);
     void OnUpdate(const GestureContext& context);

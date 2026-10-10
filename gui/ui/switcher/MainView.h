@@ -25,7 +25,11 @@ public:
     bool Initialize(HWND hwnd, ThinXamlAppSwitcherHost& host);
     void Shutdown();
     void Resize(UINT widthPx, UINT heightPx, double scale);
+    // 窗口铺满整个显示器，但卡片只在工作区内排版：四边内缩为任务栏等占用的像素（相对客户区）。
+    void SetWorkAreaInsetsPx(const RECT& insets) { workAreaInsetsPx_ = insets; }
     void RenderSample(UINT widthPx, UINT heightPx, double scale);
+    // 强制在当前调用栈内跑完 measure/arrange，消除"属性已设、布局未跑"的窗口期。
+    void EnsureLayoutCommitted();
     void CancelInteraction();
     bool HitTest(PointDip point) const;
     RECT VisibleBoundsPx() const;
@@ -87,6 +91,7 @@ private:
     SizeDip contentBoundsDip_{};
     SizeDip visibleBoundsDip_{};
     SizeDip clientSizeDip_{};
+    RECT workAreaInsetsPx_{};
     bool xamlPointerDragging_ = false;
     bool xamlPointerPressed_ = false;
     size_t activeDragItemIndex_ = static_cast<size_t>(-1);

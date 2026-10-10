@@ -126,7 +126,10 @@ private:
             return 0;
 
         case WM_INPUT:
-            ApplyFrame(rawTouchInput_.ProcessRawInput(lParam));
+            for (const RawTouchInput::Frame& frame : rawTouchInput_.ProcessRawInput(lParam))
+            {
+                ApplyFrame(frame);
+            }
             InvalidateRect(hwnd_, nullptr, FALSE);
             return 0;
 
@@ -167,7 +170,7 @@ private:
 
     void ApplyFrame(const RawTouchInput::Frame& frame)
     {
-        if (!frame.HasTouch() && !(frame.frameSync && frame.contactCount == 0))
+        if (!frame.HasTouch() && !frame.AllContactsReleased())
         {
             return;
         }

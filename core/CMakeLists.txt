@@ -1,7 +1,13 @@
 add_library(touchrev_core STATIC
     common/IconUtils.cpp
     common/IconUtils.h
+    common/AppSettings.cpp
     common/AppSettings.h
+    common/AutoStart.cpp
+    common/AutoStart.h
+    common/PdbCache.cpp
+    common/PdbCache.h
+    common/RegistryUtils.h
     common/CoordinateSpace.h
     common/DwmUtils.h
     common/FileUtils.h
@@ -59,6 +65,7 @@ target_link_libraries(touchrev_core PUBLIC
     runtimeobject
     advapi32
     shell32
+    shlwapi
     propsys
     hid
 )

@@ -33,8 +33,9 @@ struct GestureContact
     double DistanceFromStart() const { return std::hypot(DeltaX(), DeltaY()); }
     double Speed() const { return std::hypot(velocityX, velocityY); }
 
-    static GestureContact FromTouchPoint(const RawTouchInput::TouchPoint& point);
-    void UpdateFromTouchPoint(const RawTouchInput::TouchPoint& point);
+    // 手势坐标统一为 0.1mm，阈值才能在不同分辨率的数字化仪上保持一致的物理含义。
+    static GestureContact FromTouchPoint(const RawTouchInput::TouchPoint& point, const RawTouchInput::DeviceGeometry& geometry);
+    void UpdateFromTouchPoint(const RawTouchInput::TouchPoint& point, const RawTouchInput::DeviceGeometry& geometry);
     void End();
 };
 

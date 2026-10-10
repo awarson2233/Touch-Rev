@@ -553,12 +553,16 @@ bool UninstallDllFromProcess(DWORD pid,
                              const std::wstring& dllPath,
                              RemoteModuleInfo* unloadedModule,
                              DWORD* freeLibraryResult,
-                             std::wstring* error) {
+                             std::wstring* error,
+                             bool* unloadDeferred) {
     if (unloadedModule) {
         *unloadedModule = EmptyRemoteModuleInfo();
     }
     if (freeLibraryResult) {
         *freeLibraryResult = 0;
+    }
+    if (unloadDeferred) {
+        *unloadDeferred = false;
     }
 
     RemoteModuleInfo moduleInfo;
@@ -599,6 +603,19 @@ bool UninstallDllFromProcess(DWORD pid,
     if (!CallRemoteRoutine(process, remoteStop, L"TouchRevHookStop",
                            kHookControlTimeoutMs, &stopResult, error)) {
         CloseHandle(process);
+        if (stopResult == ERROR_IO_PENDING) {
+            // DLL 会在初始化结束后自行卸载，这里再 FreeLibrary 会卸掉仍在运行的初始化线程。
+            if (error) {
+                error->clear();
+            }
+            if (unloadDeferred) {
+                *unloadDeferred = true;
+            }
+            LogMessage(L"injector", LogLevel::Info,
+                       L"event=HOOK_STOP_DEFERRED pid=%lu module=0x%p",
+                       pid, moduleInfo.module);
+            return true;
+        }
         return false;
     }
 
