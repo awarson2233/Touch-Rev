@@ -482,8 +482,8 @@ OperationResult HookController::Execute(Operation operation, bool userInitiated)
         const auto trim = touchrev::common::pdbcache::Trim();
         if (trim.removedVersions > 0)
         {
-            DebugLog(L"[HookController] trimmed " + std::to_wstring(trim.removedVersions) + L" PDB versions, freed " +
-                     touchrev::common::pdbcache::FormatBytes(trim.freedBytes));
+            TR_TRACE(L"[HookController] trimmed " << trim.removedVersions << L" PDB versions, freed "
+                                                  << touchrev::common::pdbcache::FormatBytes(trim.freedBytes));
         }
 
         result.succeeded = EnableIn(target, error);

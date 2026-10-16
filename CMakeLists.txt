@@ -10,6 +10,9 @@ endif()
 
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
+# 追踪日志（TR_TRACE、Info 级 LogMessage）只在 Debug 构建中编译进来；Release 只保留限频的错误日志。
+add_compile_definitions($<$<CONFIG:Debug>:TOUCHREV_TRACE>)
+
 # 统一设置全局编译输出目录为顶级二进制目录，支持多配置生成器（如 VS 自动追加 /Debug 或 /Release）
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR})

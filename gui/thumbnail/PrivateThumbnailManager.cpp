@@ -179,9 +179,7 @@ PrivateThumbnailSlot PrivateThumbnailManager::CreateForWindow(
     ResizeSlot(slot, widthDip, heightDip);
     slot.lastError = S_OK;
 
-    std::wstringstream log;
-    log << L"Thumbnail attached hwnd=" << hwnd << L" sizeDip=" << widthDip << L"x" << heightDip;
-    DebugLog(log.str());
+    TR_TRACE(L"Thumbnail attached hwnd=" << hwnd << L" sizeDip=" << widthDip << L"x" << heightDip);
     return slot;
 }
 

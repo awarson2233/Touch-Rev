@@ -86,7 +86,9 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int /*showCommand*/)
         return -1;
     }
 
-    if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
+    // 清单已声明 DPI 感知时再次设置返回 ERROR_ACCESS_DENIED，属正常情况，不记录。
+    if (!SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) &&
+        GetLastError() != ERROR_ACCESS_DENIED)
     {
         DebugLog(L"SetProcessDpiAwarenessContext failed; continuing with process default DPI awareness.");
     }

@@ -795,13 +795,15 @@ void MainView::RenderSample(UINT widthPx, UINT heightPx, double scale)
             windows.end());
     }
 
+#if defined(TOUCHREV_TRACE)
     std::wstringstream log;
     log << L"EnumerateActiveWindows: count=" << windows.size();
     for (const auto& window : windows)
     {
         log << L"\n  hwnd=" << window.hwnd << L" title=" << window.title;
     }
-    DebugLog(log.str());
+    DebugTrace(log.str());
+#endif
     ApplyLayout(windows, widthPx, heightPx, scale);
 }
 
@@ -946,7 +948,6 @@ std::unique_ptr<CardView> MainView::CreateItem()
 
 void MainView::ProcessItemPressed(size_t index, winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)
 {
-    DebugLog(L"[DEBUG] ProcessItemPressed index=" + std::to_wstring(index));
     if (!root_ || index >= cards_.size())
     {
         return;
@@ -972,7 +973,6 @@ void MainView::ProcessItemPressed(size_t index, winrt::Windows::UI::Xaml::Input:
 
 void MainView::ProcessItemMoved(winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args)
 {
-    DebugLog(L"[DEBUG] ProcessItemMoved pressed=" + std::to_wstring(xamlPointerPressed_) + L" dragging=" + std::to_wstring(xamlPointerDragging_) + L" activeIndex=" + std::to_wstring(activeDragItemIndex_));
     if ((!xamlPointerPressed_ && !xamlPointerDragging_) || !root_ || activeDragItemIndex_ >= cards_.size())
     {
         return;

@@ -664,12 +664,8 @@ MainWindow::ActivationResult MainWindow::TryActivateSwitcher()
     result.actualForeground = GetForegroundWindow();
     result.foreground = result.actualForeground == hwnd_;
 
-    std::wstringstream log;
-    log << L"[AppSwitcherActivation] foreground=" << result.foreground
-        << L" direct=" << result.directSucceeded
-        << L" actualForeground=" << result.actualForeground;
-    DebugLog(log.str());
-
+    TR_TRACE(L"[AppSwitcherActivation] foreground=" << result.foreground << L" direct=" << result.directSucceeded
+                                                     << L" actualForeground=" << result.actualForeground);
     return result;
 }
 
@@ -1073,9 +1069,8 @@ HMONITOR MainWindow::ResolveTargetMonitor(const POINT* touchCenter) const
         HMONITOR monitor = MonitorFromPoint(*touchCenter, MONITOR_DEFAULTTONEAREST);
         if (monitor)
         {
-            std::wstringstream log;
-            log << L"[ResolveTargetMonitor] Using touchCenter=(" << touchCenter->x << L", " << touchCenter->y << L") monitor=" << monitor;
-            DebugLog(log.str());
+            TR_TRACE(L"[ResolveTargetMonitor] Using touchCenter=(" << touchCenter->x << L", " << touchCenter->y
+                                                                    << L") monitor=" << monitor);
             return monitor;
         }
     }
@@ -1087,9 +1082,8 @@ HMONITOR MainWindow::ResolveTargetMonitor(const POINT* touchCenter) const
         HMONITOR monitor = MonitorFromPoint(cursor, MONITOR_DEFAULTTONEAREST);
         if (monitor)
         {
-            std::wstringstream log;
-            log << L"[ResolveTargetMonitor] Using cursor=(" << cursor.x << L", " << cursor.y << L") monitor=" << monitor;
-            DebugLog(log.str());
+            TR_TRACE(L"[ResolveTargetMonitor] Using cursor=(" << cursor.x << L", " << cursor.y << L") monitor="
+                                                               << monitor);
             return monitor;
         }
     }
@@ -1100,12 +1094,12 @@ HMONITOR MainWindow::ResolveTargetMonitor(const POINT* touchCenter) const
         HMONITOR monitor = MonitorFromWindow(foreground, MONITOR_DEFAULTTONEAREST);
         if (monitor)
         {
-            DebugLog(L"[ResolveTargetMonitor] Using foreground window monitor");
+            TR_TRACE(L"[ResolveTargetMonitor] Using foreground window monitor");
             return monitor;
         }
     }
 
-    DebugLog(L"[ResolveTargetMonitor] Using primary monitor fallback");
+    TR_TRACE(L"[ResolveTargetMonitor] Using primary monitor fallback");
     return MonitorFromPoint(POINT{0, 0}, MONITOR_DEFAULTTOPRIMARY);
 }
 

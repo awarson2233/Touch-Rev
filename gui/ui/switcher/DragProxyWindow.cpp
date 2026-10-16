@@ -32,18 +32,6 @@ Fn User32Proc(const char* name)
     return user32 ? reinterpret_cast<Fn>(GetProcAddress(user32, name)) : nullptr;
 }
 
-std::wstring RectText(const RECT& rect)
-{
-    std::wstringstream text;
-    text << L"(" << rect.left << L", " << rect.top << L", " << rect.right << L", " << rect.bottom << L")";
-    return text.str();
-}
-
-void Log(const std::wstring& message)
-{
-    DebugLog(L"[DragProxy] " + message);
-}
-
 // 移动循环里左键（触摸已转成鼠标拖拽）是否仍按着；按着时的尺寸变化是系统的拖动动画，不是最终排列。
 bool IsDragButtonDown()
 {
@@ -81,8 +69,6 @@ bool DragProxyWindow::Prepare(HINSTANCE instance)
         return false;
     }
 
-    const ULONGLONG begin = GetTickCount64();
-
     // 系统只对可调整大小、可最大化的窗口提供贴靠，因此保留完整的重叠窗口样式；
     // 非客户区由 WM_NCCALCSIZE 去掉。没有重定向位面，卡片圆角外由 XAML 的透明像素直接透出桌面。
     hwnd_ = CreateWindowExW(
@@ -116,9 +102,6 @@ bool DragProxyWindow::Prepare(HINSTANCE instance)
         return false;
     }
 
-    std::wstringstream message;
-    message << L"Prepared in " << (GetTickCount64() - begin) << L"ms";
-    Log(message.str());
     return true;
 }
 
@@ -130,8 +113,6 @@ bool DragProxyWindow::Show(HINSTANCE instance, HWND target, const RECT& cardRect
         Destroy();
     }
 
-    const ULONGLONG begin = GetTickCount64();
-    const bool wasPrepared = hwnd_ != nullptr;
     if (!Prepare(instance))
     {
         return false;
@@ -170,10 +151,6 @@ bool DragProxyWindow::Show(HINSTANCE instance, HWND target, const RECT& cardRect
     ShowWindow(hwnd_, SW_SHOW);
     SetForegroundWindow(hwnd_);
 
-    std::wstringstream message;
-    message << L"Shown target=" << target_ << L" rect=" << RectText(windowRect) << L" prepared=" << wasPrepared
-            << L" in " << (GetTickCount64() - begin) << L"ms";
-    Log(message.str());
     return true;
 }
 
@@ -199,7 +176,7 @@ bool DragProxyWindow::BuildContent()
     card_ = CardView::Create(0, {});
     if (!card_)
     {
-        Log(L"Failed to create card view.");
+        DebugLog(L"[DragProxy] Failed to create card view.");
         return false;
     }
 
@@ -255,14 +232,6 @@ bool DragProxyWindow::BindTarget()
 
 void DragProxyWindow::OnSize(UINT width, UINT height)
 {
-    if (target_)
-    {
-        std::wstringstream text;
-        text << L"WM_SIZE " << width << L"x" << height << L" card=" << cardSizePx_.cx << L"x" << cardSizePx_.cy
-             << L" buttonDown=" << IsDragButtonDown();
-        Log(text.str());
-    }
-
     host_.Resize(width, height);
     if (cardScale_ && cardSizePx_.cx > 0 && cardSizePx_.cy > 0)
     {
@@ -283,7 +252,7 @@ bool DragProxyWindow::StartMove(POINT cursor)
     static const auto enterMoveSizeLoop = User32Proc<EnterMoveSizeLoopFn>("EnterMoveSizeLoop");
     if (!enterMoveSizeLoop)
     {
-        Log(L"EnterMoveSizeLoop is unavailable on this system.");
+        TR_TRACE(L"[DragProxy] EnterMoveSizeLoop is unavailable on this system.");
         return false;
     }
 
@@ -363,6 +332,12 @@ LRESULT DragProxyWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lPara
         ValidateRect(hwnd_, nullptr);
         return 0;
 
+    // 可调整大小的窗口默认最小宽度为 SM_CXMINTRACK（175% 下 264px），比窄卡片宽时窗口会被撑开，
+    // 卡片只占左侧一部分，系统拖动时按窗口矩形画的模糊背景就比卡片宽。代理尺寸完全跟随卡片，不设下限。
+    case WM_GETMINMAXINFO:
+        reinterpret_cast<MINMAXINFO*>(lParam)->ptMinTrackSize = {1, 1};
+        return 0;
+
     case WM_WINDOWPOSCHANGING:
         OnWindowPosChanging(*reinterpret_cast<WINDOWPOS*>(lParam));
         break;
@@ -418,19 +393,17 @@ void DragProxyWindow::Finish()
             arrangedWindowRect_.bottom - frameInsets_.bottom};
     }
 
+    TR_TRACE(L"[DragProxy] Finish release=(" << releasePoint_.x << L"," << releasePoint_.y << L") kind="
+                                             << static_cast<int>(result.kind) << L" rect=(" << result.arrangedRect.left
+                                         << L", " << result.arrangedRect.top << L", " << result.arrangedRect.right
+                                         << L", " << result.arrangedRect.bottom << L") systemArranged="
+                                         << systemArranged);
+
     // 先摆好真实窗口再销毁代理，中间不留空档。
-    const ULONGLONG begin = GetTickCount64();
     if (finishedCallback_ && result.target)
     {
         finishedCallback_(result);
     }
-    const ULONGLONG applied = GetTickCount64();
     Destroy();
-
-    std::wstringstream text;
-    text << L"Finish kind=" << static_cast<int>(result.kind) << L" rect=" << RectText(result.arrangedRect)
-         << L" systemArranged=" << systemArranged << L" apply=" << (applied - begin) << L"ms destroy="
-         << (GetTickCount64() - applied) << L"ms";
-    Log(text.str());
 }
 }

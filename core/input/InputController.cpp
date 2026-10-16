@@ -77,10 +77,8 @@ ScreenRotation RotationFromMonitor(HMONITOR monitor)
 void InputController::Initialize(HWND hwnd)
 {
     hwnd_ = hwnd;
-    if (!EnableMouseInPointer(TRUE))
-    {
-        DebugLog(L"EnableMouseInPointer failed; mouse fallback messages remain enabled.");
-    }
+    // 不开启 EnableMouseInPointer：它对整个进程生效，鼠标改以 WM_POINTER 送达后，
+    // 系统移动循环（拖出卡片时的代理窗口）收不到鼠标移动，代理会停在原地。鼠标走传统的 WM_*BUTTON* 消息。
 
     if (!RegisterTouchWindow(hwnd, TWF_WANTPALM))
     {
@@ -404,10 +402,9 @@ bool InputController::MapGestureCenterToScreen(
     screenPoint.x = rect.left + static_cast<LONG>(std::lround(screenU * static_cast<double>(width - 1)));
     screenPoint.y = rect.top + static_cast<LONG>(std::lround(screenV * static_cast<double>(height - 1)));
 
-    std::wstringstream log;
-    log << L"[TouchCenter] raw=(" << rawX << L", " << rawY << L") screen=(" << screenPoint.x << L", " << screenPoint.y
-        << L") rotation=" << rotation << L" fromPointerDevice=" << mapping.fromPointerDevice;
-    DebugLog(log.str());
+    TR_TRACE(L"[TouchCenter] raw=(" << rawX << L", " << rawY << L") screen=(" << screenPoint.x << L", "
+                                     << screenPoint.y << L") rotation=" << rotation
+                                     << L" fromPointerDevice=" << mapping.fromPointerDevice);
     return true;
 }
 

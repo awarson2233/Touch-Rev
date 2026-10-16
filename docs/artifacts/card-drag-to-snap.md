@@ -72,7 +72,7 @@ BOOL WINAPI EnterMoveSizeLoop(HWND hwnd, POINT ptCursor, MOVESIZE_OPERATION move
 
 实现在 [DragProxyWindow.cpp](/gui/ui/switcher/DragProxyWindow.cpp)，由 [MainWindow.cpp](/gui/ui/switcher/MainWindow.cpp) 的 `HandOffDragToProxy` / `StartPendingWindowDrag` / `ApplyDragProxyResult` 驱动；卡片矩形来自 [MainView.cpp](/gui/ui/switcher/MainView.cpp) 的 `TryHandOffDrag`，在抓起阈值处调用，此时卡片还停在布局位置，代理从原位"浮起"。
 
-- **样式**：系统只对可调整大小、可最大化的窗口提供贴靠，代理用完整的 `WS_OVERLAPPEDWINDOW`，再用 `WM_NCCALCSIZE` 返回 0 去掉非客户区。创建时的首次 `WM_NCCALCSIZE` 不带 `wParam`，不会走去掉非客户区的分支，必须创建后补一次 `SWP_FRAMECHANGED`，否则顶部留一条 56 px 的非客户区并被画成 Win10 白色标题栏；`WM_NCPAINT` / `WM_NCACTIVATE` 也直接返回，防止激活切换时补画。`DWMWA_NCRENDERING_POLICY` 设为禁用，去掉 DWM 的边框、阴影和圆角。
+- **样式**：系统只对可调整大小、可最大化的窗口提供贴靠，代理用完整的 `WS_OVERLAPPEDWINDOW`，再用 `WM_NCCALCSIZE` 返回 0 去掉非客户区。创建时的首次 `WM_NCCALCSIZE` 不带 `wParam`，不会走去掉非客户区的分支，必须创建后补一次 `SWP_FRAMECHANGED`，否则顶部留一条 56 px 的非客户区并被画成 Win10 白色标题栏；`WM_NCPAINT` / `WM_NCACTIVATE` 也直接返回，防止激活切换时补画。`DWMWA_NCRENDERING_POLICY` 设为禁用，去掉 DWM 的边框、阴影和圆角。可调整大小的窗口默认有最小拖动尺寸 `SM_CXMINTRACK`（175% 下 264 px），按 100×100 创建的预备代理实测被撑成 264×100，因此 `WM_GETMINMAXINFO` 把最小尺寸放开到 1×1。已知问题：窄卡片拖动时系统画的模糊背景仍比卡片宽，放开最小尺寸后依旧存在，原因未查明。
 - **内容**：代理以 `WS_EX_NOREDIRECTIONBITMAP` 创建，内部是第二个 XAML 岛（[ThinXamlAppSwitcherHost](/gui/ui/switcher/ThinXamlAppSwitcherHost.cpp)），放一个用 `SwitcherItem.xaml` 建的 `CardView`，外观与切换器里的卡片一致，圆角外是透明像素。缩略图由代理自己的 `PrivateThumbnailManager` 提供，最小化窗口也能显示，拖动期间不需要还原。靠近 Snap Bar 时系统缩小窗口，卡片用 `ScaleTransform` 等比缩放而不重新排版。
 - **预备**：建窗口、XAML 岛和加载卡片模板要 15–47 ms，拖出时现场创建会让快速拖出的卡片落后于手指。代理在切换器预热时和每次拖动结束后空闲时预先建好（`Prepare`），拖出时只绑定目标、设尺寸位置、显示。代理每次用完即销毁（系统会在窗口上留下排列状态），所以每次都要重新预备。
 - **对齐手指**：代理大小取卡片矩形，位置让"最初按在卡片上的点"落在当前指针下；显示到进入移动循环之间手指还会移动，`StartMove` 进入循环前再对齐一次，循环才以正确的相对位置跟手。
@@ -137,4 +137,4 @@ sequenceDiagram
 
 - **提权窗口**：代理拖动正常，最后的 `SetWindowPos` 被 UIPI 拒绝，真实窗口不动，与改造前的行为一致。
 - **旧系统**：缺 `ConvertPrimaryPointerToMouseDrag` 时触摸拖动不交接，由切换器内的原有拖动接管；缺 `EnterMoveSizeLoop` 时代理已显示、切换器已隐藏，`StartPendingWindowDrag` 销毁代理并把真实窗口激活到当前光标处。
-- **鼠标拖动**：跳过转换，直接进入代理的移动循环。
+- **鼠标拖动**：跳过转换，直接进入代理的移动循环。前提是进程**不能**开启 `EnableMouseInPointer`：它对整个进程生效且无法关闭，开启后真鼠标以 `WM_POINTER*` 送达，移动循环只在开头几十毫秒跟手，之后鼠标移动全被派发进代理的窗口过程（实测每 60 ms 三五十条），循环本身收不到，代理停在原地，直到松手才一步追到光标处。触摸经 `ConvertPrimaryPointerToMouseDrag` 转换出的拖拽不受影响，所以只有鼠标会卡。因此 [InputController.cpp](/core/input/InputController.cpp) 不再开启它，切换器的鼠标走传统 `WM_*BUTTON*` 消息。

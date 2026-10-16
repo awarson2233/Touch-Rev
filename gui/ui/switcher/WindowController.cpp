@@ -276,7 +276,7 @@ bool ConvertPrimaryPointerToMouseDrag()
     static const auto convert = User32Proc<ConvertPrimaryPointerToMouseDragFn>("ConvertPrimaryPointerToMouseDrag");
     if (!convert)
     {
-        DebugLog(L"ConvertPrimaryPointerToMouseDrag is unavailable on this system.");
+        TR_TRACE(L"ConvertPrimaryPointerToMouseDrag is unavailable on this system.");
         return false;
     }
     if (!convert())
@@ -284,7 +284,6 @@ bool ConvertPrimaryPointerToMouseDrag()
         DebugLogHResult(L"[WindowDrag] ConvertPrimaryPointerToMouseDrag", HResultFromLastError());
         return false;
     }
-    DebugLog(L"[WindowDrag] ConvertPrimaryPointerToMouseDrag succeeded.");
     return true;
 }
 

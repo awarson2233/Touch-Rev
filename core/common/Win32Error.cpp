@@ -1,7 +1,12 @@
 #include "Win32Error.h"
 
+#include <algorithm>
+#include <functional>
 #include <iomanip>
+#include <mutex>
 #include <sstream>
+#include <utility>
+#include <vector>
 
 std::wstring HResultToHex(HRESULT hr)
 {
@@ -49,19 +54,100 @@ HRESULT HResultFromLastError()
     return error == ERROR_SUCCESS ? E_FAIL : HRESULT_FROM_WIN32(error);
 }
 
-void DebugLog(std::wstring_view message)
+namespace
 {
-    std::wstring line(message);
+constexpr ULONGLONG kRepeatWindowMs = 10000;
+constexpr size_t kMaxTrackedMessages = 64;
+
+struct RecentMessage
+{
+    size_t hash = 0;
+    ULONGLONG lastSent = 0;
+    unsigned suppressed = 0;
+};
+
+std::mutex g_recentMutex;
+std::vector<RecentMessage> g_recentMessages;
+
+// 同一键在窗口期内只放行第一次；放行时通过 suppressed 返回上次放行以来被抑制的次数。
+bool ShouldSend(std::wstring_view key, unsigned& suppressed)
+{
+    const size_t hash = std::hash<std::wstring_view>{}(key);
+    const ULONGLONG now = GetTickCount64();
+    std::lock_guard lock(g_recentMutex);
+
+    for (auto& entry : g_recentMessages)
+    {
+        if (entry.hash != hash)
+        {
+            continue;
+        }
+        if (now - entry.lastSent < kRepeatWindowMs)
+        {
+            ++entry.suppressed;
+            return false;
+        }
+        suppressed = std::exchange(entry.suppressed, 0u);
+        entry.lastSent = now;
+        return true;
+    }
+
+    // 表满时淘汰最久未发送的一项，内存占用固定。
+    if (g_recentMessages.size() >= kMaxTrackedMessages)
+    {
+        auto oldest = std::min_element(
+            g_recentMessages.begin(), g_recentMessages.end(), [](const RecentMessage& a, const RecentMessage& b) {
+                return a.lastSent < b.lastSent;
+            });
+        g_recentMessages.erase(oldest);
+    }
+    g_recentMessages.push_back({hash, now, 0});
+    suppressed = 0;
+    return true;
+}
+
+void Send(std::wstring line, unsigned suppressed)
+{
+    if (suppressed > 0)
+    {
+        line += L" (suppressed ";
+        line += std::to_wstring(suppressed);
+        line += L" repeats)";
+    }
     line += L"\n";
     OutputDebugStringW(line.c_str());
+}
+}
+
+void DebugLog(std::wstring_view message)
+{
+    unsigned suppressed = 0;
+    if (ShouldSend(message, suppressed))
+    {
+        Send(std::wstring(message), suppressed);
+    }
 }
 
 void DebugLogHResult(std::wstring_view context, HRESULT hr)
 {
+    // 先按"上下文 + 错误码"判定限频，被抑制时连 FormatMessage 都不做。
     std::wstring line(context);
     line += L" failed: ";
     line += HResultToHex(hr);
+
+    unsigned suppressed = 0;
+    if (!ShouldSend(line, suppressed))
+    {
+        return;
+    }
     line += L" ";
     line += HResultToMessage(hr);
-    DebugLog(line);
+    Send(std::move(line), suppressed);
+}
+
+void DebugTrace(std::wstring_view message)
+{
+    std::wstring line(message);
+    line += L"\n";
+    OutputDebugStringW(line.c_str());
 }
