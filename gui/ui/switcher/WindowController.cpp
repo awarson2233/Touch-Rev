@@ -4,6 +4,9 @@
 #include "common/DwmUtils.h"
 
 #include <dwmapi.h>
+#include <inspectable.h>
+#include <servprov.h>
+#include <winrt/base.h>
 
 #include <algorithm>
 #include <iterator>
@@ -75,6 +78,64 @@ bool IsAltTabLikeWindow(HWND hwnd)
     }
 
     return rect.right - rect.left >= 80 && rect.bottom - rect.top >= 60;
+}
+
+// Windows 11 24H2 起的 SDK 才有声明，这里按名称动态获取，旧系统上回退。
+using ConvertPrimaryPointerToMouseDragFn = BOOL(WINAPI*)();
+
+template <typename Fn>
+Fn User32Proc(const char* name)
+{
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    return user32 ? reinterpret_cast<Fn>(GetProcAddress(user32, name)) : nullptr;
+}
+
+// explorer 的应用视图接口（未公开）。IID 取自注册表 HKCR\Interface 登记的 proxy/stub，方法顺序与
+// SetCloak(APPLICATION_VIEW_CLOAK_TYPE, int) 签名取自 twinui.pcshell 符号，build 28120 实测；只声明用到的前缀。
+MIDL_INTERFACE("372E1D3B-38D3-42E4-A15B-8AB2B178F513")
+IApplicationView : public IInspectable
+{
+    virtual HRESULT STDMETHODCALLTYPE SetFocus() = 0;
+    virtual HRESULT STDMETHODCALLTYPE SwitchTo() = 0;
+    virtual HRESULT STDMETHODCALLTYPE TryInvokeBack(IUnknown* callback) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetThumbnailWindow(HWND* hwnd) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetMonitor(IUnknown** monitor) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetVisibility(int* visibility) = 0;
+    virtual HRESULT STDMETHODCALLTYPE SetCloak(int cloakType, int cloaked) = 0;
+};
+
+MIDL_INTERFACE("1841C6D7-4F9D-42C0-AF41-8747538F10E5")
+IApplicationViewCollection : public IUnknown
+{
+    virtual HRESULT STDMETHODCALLTYPE GetViews(IUnknown** views) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetViewsByZOrder(IUnknown** views) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetViewsByAppUserModelId(PCWSTR appUserModelId, IUnknown** views) = 0;
+    virtual HRESULT STDMETHODCALLTYPE GetViewForHwnd(HWND hwnd, IApplicationView** view) = 0;
+};
+
+constexpr CLSID kClsidImmersiveShell = {0xC2F03A33, 0x21F5, 0x47FA, {0xB4, 0xBB, 0x15, 0x63, 0x62, 0xA2, 0xF2, 0x39}};
+// APPLICATION_VIEW_CLOAK_TYPE：1 为默认（DWM 上表现为 DWM_CLOAKED_SHELL）。
+constexpr int kApplicationViewCloakDefault = 1;
+
+winrt::com_ptr<IApplicationViewCollection> ConnectViewCollection()
+{
+    winrt::com_ptr<IServiceProvider> shell;
+    HRESULT hr = CoCreateInstance(kClsidImmersiveShell, nullptr, CLSCTX_LOCAL_SERVER, IID_PPV_ARGS(shell.put()));
+    if (FAILED(hr))
+    {
+        DebugLogHResult(L"CoCreateInstance(ImmersiveShell)", hr);
+        return nullptr;
+    }
+
+    winrt::com_ptr<IApplicationViewCollection> collection;
+    hr = shell->QueryService(
+        __uuidof(IApplicationViewCollection), __uuidof(IApplicationViewCollection), collection.put_void());
+    if (FAILED(hr))
+    {
+        DebugLogHResult(L"QueryService(IApplicationViewCollection)", hr);
+        return nullptr;
+    }
+    return collection;
 }
 }
 
@@ -207,6 +268,91 @@ void ActivateWindow(HWND targetHwnd, POINT centerPoint, const RECT& fallbackWork
         width,
         height,
         SWP_SHOWWINDOW);
+    ActivateWindow(targetHwnd);
+}
+
+bool ConvertPrimaryPointerToMouseDrag()
+{
+    static const auto convert = User32Proc<ConvertPrimaryPointerToMouseDragFn>("ConvertPrimaryPointerToMouseDrag");
+    if (!convert)
+    {
+        DebugLog(L"ConvertPrimaryPointerToMouseDrag is unavailable on this system.");
+        return false;
+    }
+    if (!convert())
+    {
+        DebugLogHResult(L"[WindowDrag] ConvertPrimaryPointerToMouseDrag", HResultFromLastError());
+        return false;
+    }
+    DebugLog(L"[WindowDrag] ConvertPrimaryPointerToMouseDrag succeeded.");
+    return true;
+}
+
+bool SetShellCloak(HWND targetHwnd, bool cloaked)
+{
+    // 连接跨调用复用；explorer 重启后旧连接失效，失败时重连一次。
+    static winrt::com_ptr<IApplicationViewCollection> collection;
+    HRESULT hr = E_FAIL;
+    for (int attempt = 0; attempt < 2; ++attempt)
+    {
+        if (!collection)
+        {
+            collection = ConnectViewCollection();
+            if (!collection)
+            {
+                return false;
+            }
+        }
+
+        winrt::com_ptr<IApplicationView> view;
+        hr = collection->GetViewForHwnd(targetHwnd, view.put());
+        if (SUCCEEDED(hr))
+        {
+            hr = view->SetCloak(kApplicationViewCloakDefault, cloaked ? 1 : 0);
+        }
+        if (SUCCEEDED(hr))
+        {
+            return true;
+        }
+        collection = nullptr;
+    }
+
+    DebugLogHResult(cloaked ? L"[ShellCloak] Cloak" : L"[ShellCloak] Uncloak", hr);
+    return false;
+}
+
+void PlaceWindowVisibleRect(HWND targetHwnd, const RECT& visibleRect)
+{
+    if (!IsWindow(targetHwnd))
+    {
+        return;
+    }
+
+    if (IsIconic(targetHwnd) || IsZoomed(targetHwnd))
+    {
+        ShowWindow(targetHwnd, SW_RESTORE);
+    }
+
+    RECT windowRect{};
+    if (!GetWindowRect(targetHwnd, &windowRect))
+    {
+        ActivateWindow(targetHwnd);
+        return;
+    }
+
+    // 窗口矩形含不可见的缩放边框，按 DWM 的可见边界换算，可见部分才正好落在目标矩形上。
+    RECT frame = windowRect;
+    DwmGetWindowAttribute(targetHwnd, DWMWA_EXTENDED_FRAME_BOUNDS, &frame, sizeof(frame));
+    const int left = visibleRect.left - (frame.left - windowRect.left);
+    const int top = visibleRect.top - (frame.top - windowRect.top);
+    const int right = visibleRect.right + (windowRect.right - frame.right);
+    const int bottom = visibleRect.bottom + (windowRect.bottom - frame.bottom);
+
+    const BOOL placed = SetWindowPos(targetHwnd, HWND_TOP, left, top, right - left, bottom - top, SWP_SHOWWINDOW);
+    if (!placed)
+    {
+        DebugLogHResult(L"[DragProxy] SetWindowPos(target)", HResultFromLastError());
+    }
     ActivateWindow(targetHwnd);
 }
 }

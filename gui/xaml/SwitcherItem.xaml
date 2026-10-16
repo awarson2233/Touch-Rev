@@ -12,22 +12,26 @@
         <CompositeTransform x:Name="ItemTransform" />
     </Grid.RenderTransform>
 
+    <!-- 与系统 Alt+Tab 一致：整张卡片只有一层半透明底和 1px 描边，标题行与缩略图区不再单独铺底 -->
     <Border
         x:Name="MainCard"
-        Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-        CornerRadius="10">
+        Background="{ThemeResource CardBackgroundFillColorOnThinAcrylicBrush}"
+        BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+        BorderThickness="1"
+        CornerRadius="12">
         <Grid x:Name="ItemLayoutGrid">
+            <!-- 标题行固定 40 DIP（与系统 Alt+Tab 一致），LayoutEngine 按当前 DPI 换算成像素 -->
             <Grid.RowDefinitions>
-                <RowDefinition Height="1.8*" />
-                <RowDefinition Height="8.2*" />
+                <RowDefinition Height="40" />
+                <RowDefinition Height="*" />
             </Grid.RowDefinitions>
 
             <Border
                 x:Name="TitleBorder"
                 Grid.Row="0"
-                Background="{ThemeResource ControlAltFillColorSecondaryBrush}"
+                Background="Transparent"
                 BorderThickness="0"
-                CornerRadius="10,10,0,0">
+                CornerRadius="11,11,0,0">
                 <Grid x:Name="TitleGrid" Padding="0">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="Auto" />
@@ -68,6 +72,7 @@
                     <Button
                         x:Name="CloseButton"
                         Grid.Column="2"
+                        Width="40"
                         Padding="0"
                         HorizontalAlignment="Right"
                         VerticalAlignment="Stretch"
@@ -91,9 +96,9 @@
                 x:Name="ContentFrame"
                 Grid.Row="1"
                 Margin="0"
-                Background="{ThemeResource SolidBackgroundFillColorBaseBrush}"
+                Background="Transparent"
                 BorderThickness="0"
-                CornerRadius="0,0,10,10">
+                CornerRadius="0,0,11,11">
                 <Grid>
                     <TextBlock
                         x:Name="ThumbnailPlaceholderText"
@@ -107,8 +112,8 @@
             <Border
                 x:Name="PressOverlay"
                 Grid.RowSpan="2"
-                Background="{ThemeResource ControlFillColorSecondaryBrush}"
-                CornerRadius="10"
+                Background="{ThemeResource CardPressedOverlayBrush}"
+                CornerRadius="11"
                 IsHitTestVisible="False"
                 Visibility="Collapsed" />
         </Grid>

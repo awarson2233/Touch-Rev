@@ -38,9 +38,9 @@ graph TD
 ### 2.1 亚克力主容器 (AppSwitcherContainer)
 
 * **亚克力效果 (Acrylic Layer)**：
-  主显示面板 `AppSwitcherContainer` 并非单纯的单色透明，而是通过 [MainView.cpp](file:///d:/source/repos/Touch-Rev-GUI/src/appswitcher/MainView.cpp) 接入了 Win32Composition 亚克力材质（`win32acrylic::AcrylicMaterial::Acrylic`），对背后的桌面窗口进行大范围模糊处理（模糊半径 `blurAmount = 80.0f`，加之微弱噪点 `noiseOpacity = 0.02f`），为界面提供了现代的 Windows 11 “云母/亚克力” 视觉质感。
+  主显示面板 `AppSwitcherContainer` 通过 [MainView.cpp](/gui/ui/switcher/MainView.cpp) 挂上 Win32Acrylic 的 luminosity 配方亚克力（`win32acrylic::AcrylicMaterial::Acrylic`，HostBackdrop），参数照搬系统 Alt+Tab 的 `AcrylicInAppFillColorThinBrush`：模糊 30、噪点 0.02、tint 不透明度 0，luminosity 色暗色 `#545454@0.64`、亮色 `#D3D3D3@0.44`。取值来源见 [alt-tab-visual-params.md](/docs/artifacts/alt-tab-visual-params.md)。
 * **圆角与边框**：
-  主面板容器具有 `24` 的圆角（`CornerRadius="24"`）。其外围绘制了一圈 `1px` 粗细的半透明白色描边（`BorderBrush="#55FFFFFF"`），使得深色与亮色壁纸下都能清晰辨识界面边缘。
+  主面板圆角 `8`，外围 `1px` 描边 `SurfaceStrokeColorDefaultBrush`（两种主题都是 `#66757575`），与系统 Alt+Tab 一致。
 
 ### 2.2 焦点边框 (FocusBorder)
 
@@ -62,13 +62,13 @@ graph TD
 
 ## 3. 单个窗口卡片 (CardView) 外观设计
 
-单个切换项卡片（[CardView.cpp](file:///d:/source/repos/Touch-Rev-GUI/src/appswitcher/CardView.cpp)）由标题栏和内容区按 `1.8 : 8.2` 的比例分割（基于高分屏适配，亦可通过 `LayoutEngine::TitleRowWeight` 和 `ContentRowWeight` 控制比例）：
+单个切换项卡片（[CardView.cpp](/gui/ui/switcher/CardView.cpp)）由固定 `40 DIP` 的标题行和缩略图区组成，与系统 Alt+Tab 一致。标题行高度与卡片描边宽度由 `CardView::LoadTemplateMetrics` 从模板读出，[LayoutEngine.cpp](/gui/ui/switcher/LayoutEngine.cpp) 按当前 DPI 换算成像素，使缩略图区正好保持窗口宽高比：
 ![单个窗口卡片布局设计](appswitcher_card.svg)
 
 ### 3.1 标题栏区 (TitleBorder)
 
 * **背景与多态**：
-  圆角为 `10, 10, 0, 0`。常规状态下背景色为半透明深灰 `#F0303030`；当鼠标悬停（Hover）在卡片上时，背景会淡入为稍微亮一些的 `titleHoverBackground`，给予视觉反馈。
+  标题栏本身透明，卡片底色与描边统一画在外层 `MainCard` 上：圆角 `12`、`1px` 描边 `CardStrokeColorDefaultBrush`，底色 `CardBackgroundFillColorOnThinAcrylicBrush`（暗 `#A6000000` / 亮 `#E6F6F6F6`），与系统 Alt+Tab 的卡片一致。
 * **图标加载**：
   优先尝试利用 Win32 API 抓取对应窗口 HWND 的实际运行图标并赋值给 `AppIcon`。如果某些窗口没有提供图标，则回退显示通用系统齿轮或窗口形状的 Segoe MDL2 字符图标 `&#xE700;`（`DefaultIcon`）。
 * **标题文字**：
@@ -79,7 +79,7 @@ graph TD
 ### 3.2 内容缩略图区 (ContentFrame)
 
 * **背景设计**：
-  底部圆角为 `0, 0, 10, 10`。背景色设置为近乎纯黑的 `#FF101010`。
+  底部圆角为 `0, 0, 11, 11`（卡片圆角减去描边宽度），背景透明，直接透出卡片底色。
 * **实时缩略图 (DWM Thumbnail)**：
   该区域实质是宿主在 XAML 控件树上的 Win32 Native 窗口画面投影占位符。`PrivateThumbnailManager` 在该区域加载实时的 DWM 缩略图（DWM Thumbnail Slot），并根据 DPI 适配自动对原窗口截图进行裁剪和拉伸限制，使卡片内容具有物理级别的连贯性。
 
@@ -87,8 +87,7 @@ graph TD
 
 卡片内置了一套高灵敏的 Pointer 状态机，根据被选定/拖拽状态实时改变比例和图层：
 
-* **悬停 (Hover)**：卡片对应的标题栏底色变亮。
-* **按压 (Pressed)**：整个卡片在二维平面上收缩至原尺寸的 `98.5%`（`Scale = 0.985`），并亮起半透明的暗黑色蒙版 `PressOverlay`，模拟物理按压深度。
+* **按压 (Pressed)**：整个卡片在二维平面上收缩至原尺寸的 `98.5%`（`Scale = 0.985`），并显示压暗蒙版 `PressOverlay`（`CardPressedOverlayBrush`，两种主题都是 `#37000000`，取自系统 Alt+Tab 的 `PointerOverVisualBrush`），拖拽期间同样保持压暗；画刷由模板以 ThemeResource 绑定，`CardView` 只切换其可见性。
 * **拖拽 (Grabbed / Dragging)**：整个卡片大幅收缩至原尺寸的 `90%`（`Scale = 0.90`），其他不相关的窗口卡片会被整体暂时隐退，只突出显示当前正在进行大范围拖拽的主活动卡片。
 
 ---

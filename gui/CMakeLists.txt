@@ -9,6 +9,8 @@ add_executable(TouchRevGUI WIN32
     ui/config/ConfigWindow.h
     ui/switcher/CardView.cpp
     ui/switcher/CardView.h
+    ui/switcher/DragProxyWindow.cpp
+    ui/switcher/DragProxyWindow.h
     ui/switcher/LayoutEngine.cpp
     ui/switcher/LayoutEngine.h
     ui/switcher/WindowController.cpp

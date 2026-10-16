@@ -242,8 +242,10 @@ bool ConfigWindow::Initialize(HINSTANCE instance, int showCommand)
     const int x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
     const int y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
 
+    // 不要 GDI 重定向位面：宿主从不绘制，这张位面默认是不透明白色，会整块盖住 Mica，
+    // 亮暗主题下都只剩白底。客户区只由透明的 XAML island 合成，Mica 直接从底下透上来。
     hwnd_ = CreateWindowExW(
-        0,
+        WS_EX_NOREDIRECTIONBITMAP,
         ConfigWindow::WindowClassName,
         kWindowTitle,
         style,

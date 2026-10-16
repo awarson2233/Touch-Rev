@@ -97,7 +97,6 @@ bool CardView::Initialize(
         transform = root.FindName(L"ItemTransform").as<winrt::Windows::UI::Xaml::Media::CompositeTransform>();
         layoutGrid = root.FindName(L"ItemLayoutGrid").as<winrt::Windows::UI::Xaml::Controls::Grid>();
         mainCard = root.FindName(L"MainCard").as<winrt::Windows::UI::Xaml::Controls::Border>();
-        titleBorder = root.FindName(L"TitleBorder").as<winrt::Windows::UI::Xaml::Controls::Border>();
         title = root.FindName(L"TitleText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
         defaultIcon = root.FindName(L"DefaultIcon").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
         appIcon = root.FindName(L"AppIcon").as<winrt::Windows::UI::Xaml::Controls::Image>();
@@ -109,19 +108,8 @@ bool CardView::Initialize(
         }
         pressOverlay = root.FindName(L"PressOverlay").as<winrt::Windows::UI::Xaml::Controls::Border>();
 
-        ApplyRowWeights();
+        LoadTemplateMetrics();
         ApplyTheme(true);
-
-        root.PointerEntered([this](auto const&, auto const&) {
-            hovered = true;
-            UpdateVisualState();
-        });
-
-        root.PointerExited([this](auto const&, auto const&) {
-            hovered = false;
-            UpdateVisualState();
-        });
-
 
         if (closeButton)
         {
@@ -130,14 +118,6 @@ bool CardView::Initialize(
                 {
                     callbacks.onCloseClicked(index);
                 }
-            });
-            closeButton.PointerEntered([this](auto const&, auto const&) {
-                closeButtonHovered = true;
-                UpdateVisualState();
-            });
-            closeButton.PointerExited([this](auto const&, auto const&) {
-                closeButtonHovered = false;
-                UpdateVisualState();
             });
         }
 
@@ -177,18 +157,24 @@ bool CardView::Initialize(
     }
 }
 
-void CardView::ApplyRowWeights()
+void CardView::LoadTemplateMetrics()
 {
-    if (!layoutGrid)
+    if (layoutGrid)
     {
-        return;
+        const auto rows = layoutGrid.RowDefinitions();
+        if (rows.Size() >= 1)
+        {
+            const auto titleHeight = rows.GetAt(0).Height();
+            if (titleHeight.GridUnitType == winrt::Windows::UI::Xaml::GridUnitType::Pixel)
+            {
+                titleHeightDip_ = titleHeight.Value;
+            }
+        }
     }
 
-    const auto rows = layoutGrid.RowDefinitions();
-    if (rows.Size() >= 2)
+    if (mainCard)
     {
-        titleRowWeight_ = rows.GetAt(0).Height().Value;
-        contentRowWeight_ = rows.GetAt(1).Height().Value;
+        borderDip_ = mainCard.BorderThickness().Top;
     }
 
     if (root)
@@ -217,48 +203,12 @@ void CardView::ApplyInteractionState()
 
 void CardView::UpdateVisualState()
 {
-    if (titleBorder)
-    {
-        winrt::Windows::UI::Xaml::Media::Brush titleBrush{nullptr};
-        if (root)
-        {
-            auto res = root.Resources();
-            const auto key = hovered ? L"ControlAltFillColorTertiaryBrush" : L"ControlAltFillColorSecondaryBrush";
-            if (res.HasKey(winrt::box_value(key)))
-            {
-                titleBrush = res.Lookup(winrt::box_value(key)).as<winrt::Windows::UI::Xaml::Media::Brush>();
-            }
-        }
-        if (titleBrush)
-        {
-            titleBorder.Background(titleBrush);
-        }
-    }
-
+    // 遮罩画刷由模板以 ThemeResource 绑定，这里只切换可见性。
     if (pressOverlay)
     {
-        if (grabbed || pressed)
-        {
-            winrt::Windows::UI::Xaml::Media::Brush overlayBrush{nullptr};
-            if (root)
-            {
-                auto res = root.Resources();
-                const auto key = grabbed ? L"ControlFillColorDefaultBrush" : L"ControlFillColorSecondaryBrush";
-                if (res.HasKey(winrt::box_value(key)))
-                {
-                    overlayBrush = res.Lookup(winrt::box_value(key)).as<winrt::Windows::UI::Xaml::Media::Brush>();
-                }
-            }
-            if (overlayBrush)
-            {
-                pressOverlay.Background(overlayBrush);
-                pressOverlay.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
-            }
-        }
-        else
-        {
-            pressOverlay.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
-        }
+        pressOverlay.Visibility((grabbed || pressed)
+                                    ? winrt::Windows::UI::Xaml::Visibility::Visible
+                                    : winrt::Windows::UI::Xaml::Visibility::Collapsed);
     }
 
     if (transform)
@@ -296,10 +246,8 @@ void CardView::Reset()
     layoutPosition = {};
     layoutSize = {};
     visible = false;
-    hovered = false;
     pressed = false;
     grabbed = false;
-    closeButtonHovered = false;
     if (appIcon)
     {
         appIcon.Source(nullptr);
@@ -353,14 +301,6 @@ void CardView::ApplyTitle(const std::wstring& titleText, size_t fallbackOrdinal)
     std::wstringstream fallback;
     fallback << L"Window " << fallbackOrdinal;
     title.Text(winrt::hstring{fallback.str()});
-}
-
-void CardView::ApplyCloseButtonWidth(double widthDip)
-{
-    if (closeButton)
-    {
-        closeButton.Width(widthDip);
-    }
 }
 
 void CardView::EnsureThumbnail(
@@ -430,7 +370,6 @@ void CardView::Destroy()
     transform = nullptr;
     layoutGrid = nullptr;
     mainCard = nullptr;
-    titleBorder = nullptr;
     title = nullptr;
     defaultIcon = nullptr;
     appIcon = nullptr;
@@ -465,13 +404,10 @@ void CardView::UpdateState(
         root.Height(h);
     }
     ApplyTitle(titleText, index);
-    ApplyCloseButtonWidth(std::max(28.0, h * 0.18));
 
-    const double thumbnailWidth = std::max(1.0, w);
-    const double totalWeight = titleRowWeight_ + contentRowWeight_;
-    const double thumbnailHeight = std::max(
-        1.0,
-        h * contentRowWeight_ / (totalWeight > 0.0 ? totalWeight : 1.0));
+    // 缩略图区 = 卡片扣掉四周描边与标题行。
+    const double thumbnailWidth = std::max(1.0, w - borderDip_ * 2.0);
+    const double thumbnailHeight = std::max(1.0, h - titleHeightDip_ - borderDip_ * 2.0);
     EnsureThumbnail(thumbnailManager, thumbnailWidth, thumbnailHeight, dpiScale);
 }
 

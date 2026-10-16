@@ -4,21 +4,22 @@
 
     <ResourceDictionary.ThemeDictionaries>
         <ResourceDictionary x:Key="Dark">
-            <!-- 亚克力及窗口全局（严格保持 key 值和值不变） -->
-            <Color x:Key="AcrylicTintColor">#FFFFFFFF</Color>
-            <Color x:Key="AcrylicLuminosityColor">#FFFFFFFF</Color>
-            <Color x:Key="AcrylicFallbackColor">#FF2C2C2C</Color>
+            <!-- 切换面板亚克力：取自系统 Alt+Tab（ShellComponents.Switcher.pri / StylesAndTemplates.xbf）的
+                 AcrylicInAppFillColorThinBrush，luminosity 配方，tint 不透明度为 0，只靠 luminosity 层压暗 -->
+            <Color x:Key="AcrylicTintColor">#FF545454</Color>
+            <Color x:Key="AcrylicLuminosityColor">#FF545454</Color>
+            <Color x:Key="AcrylicFallbackColor">#FF202020</Color>
             <x:Double x:Key="AcrylicBlurAmount">30</x:Double>
             <x:Double x:Key="AcrylicNoiseOpacity">0.02</x:Double>
-            <x:Double x:Key="AcrylicTintOpacity">0.12</x:Double>
-            <x:Double x:Key="AcrylicInactiveTintOpacity">0.00</x:Double>
-            <x:Double x:Key="AcrylicLuminosityOpacity">0.03</x:Double>
-            <x:Double x:Key="AcrylicSaturation">1.40</x:Double>
+            <x:Double x:Key="AcrylicTintOpacity">0</x:Double>
+            <x:Double x:Key="AcrylicLuminosityOpacity">0.64</x:Double>
 
-            <!-- 官方标准 UI 主题色彩键值（Dark） -->
-            <SolidColorBrush x:Key="SolidBackgroundFillColorBaseBrush" Color="#FF101010" />
-            <SolidColorBrush x:Key="CardBackgroundFillColorDefaultBrush" Color="#EE242424" />
-            <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#55FFFFFF" />
+            <!-- 切换面板描边与卡片，同取自系统 Alt+Tab -->
+            <SolidColorBrush x:Key="SurfaceStrokeColorDefaultBrush" Color="#66757575" />
+            <SolidColorBrush x:Key="CardBackgroundFillColorOnThinAcrylicBrush" Color="#A6000000" />
+            <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#19000000" />
+            <!-- 卡片按下/拖拽时的压暗遮罩，取自系统 Alt+Tab 的 PointerOverVisualBrush -->
+            <SolidColorBrush x:Key="CardPressedOverlayBrush" Color="#37000000" />
             <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="#12FFFFFF" />
 
             <!-- Mica 背板之上的分层填充：必须半透明，否则会把材质盖掉 -->
@@ -58,21 +59,20 @@
         </ResourceDictionary>
 
         <ResourceDictionary x:Key="Light">
-            <!-- 亚克力及窗口全局（严格保持 key 值和值不变） -->
-            <Color x:Key="AcrylicTintColor">#FFFFFFFF</Color>
-            <Color x:Key="AcrylicLuminosityColor">#FFFFFFFF</Color>
+            <!-- 切换面板亚克力：取自系统 Alt+Tab 的 AcrylicInAppFillColorThinBrush（Light） -->
+            <Color x:Key="AcrylicTintColor">#FFD3D3D3</Color>
+            <Color x:Key="AcrylicLuminosityColor">#FFD3D3D3</Color>
             <Color x:Key="AcrylicFallbackColor">#FFF3F3F3</Color>
             <x:Double x:Key="AcrylicBlurAmount">30</x:Double>
             <x:Double x:Key="AcrylicNoiseOpacity">0.02</x:Double>
-            <x:Double x:Key="AcrylicTintOpacity">0.30</x:Double>
-            <x:Double x:Key="AcrylicInactiveTintOpacity">0.90</x:Double>
-            <x:Double x:Key="AcrylicLuminosityOpacity">0.10</x:Double>
-            <x:Double x:Key="AcrylicSaturation">1.70</x:Double>
+            <x:Double x:Key="AcrylicTintOpacity">0</x:Double>
+            <x:Double x:Key="AcrylicLuminosityOpacity">0.44</x:Double>
 
-            <!-- 官方标准 UI 主题色彩键值（Light） -->
-            <SolidColorBrush x:Key="SolidBackgroundFillColorBaseBrush" Color="#FFF3F3F3" />
-            <SolidColorBrush x:Key="CardBackgroundFillColorDefaultBrush" Color="#FFFFFFFF" />
-            <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#33000000" />
+            <!-- 切换面板描边与卡片，同取自系统 Alt+Tab -->
+            <SolidColorBrush x:Key="SurfaceStrokeColorDefaultBrush" Color="#66757575" />
+            <SolidColorBrush x:Key="CardBackgroundFillColorOnThinAcrylicBrush" Color="#E6F6F6F6" />
+            <SolidColorBrush x:Key="CardStrokeColorDefaultBrush" Color="#0F000000" />
+            <SolidColorBrush x:Key="CardPressedOverlayBrush" Color="#37000000" />
             <SolidColorBrush x:Key="ControlStrokeColorDefaultBrush" Color="#0F000000" />
 
             <!-- Mica 背板之上的分层填充：必须半透明，否则会把材质盖掉 -->

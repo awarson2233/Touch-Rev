@@ -124,7 +124,8 @@ void ThemeManager::ApplyWindowBackdrop(HWND hwnd) const
     if (backdrop_ == WindowBackdrop::Mica)
     {
         // Mica 由 DWM 直接绘制在窗口内容之下，铺满整个窗口（含被 WM_NCCALCSIZE 并入客户区的
-        // 标题栏）。此时绝不能再把框架扩展进客户区——那会叠加一层"玻璃片"，把窗口整块透穿成桌面。
+        // 标题栏），前提是宿主窗口以 WS_EX_NOREDIRECTIONBITMAP 创建、没有不透明的重定向位面。
+        // 不要再把框架扩展进客户区：DWM 会在扩展区域里另画一套系统标题栏按钮，与自绘按钮重叠。
         return;
     }
 

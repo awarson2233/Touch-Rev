@@ -3,6 +3,7 @@
 #include "common/Win32Error.h"
 
 #include <winrt/base.h>
+#include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.UI.Xaml.h>
 
 #include <algorithm>
@@ -76,6 +77,8 @@ void ThinXamlAppSwitcherHost::Shutdown()
     if (xamlSource_)
     {
         xamlSource_.Content(nullptr);
+        // 同一线程上可能还有别的岛（拖动代理），每个源都要显式关闭，否则其子窗口与合成资源会残留。
+        xamlSource_.Close();
     }
 
     root_ = nullptr;

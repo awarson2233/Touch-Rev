@@ -1,5 +1,6 @@
 #pragma once
 
+#include "DragProxyWindow.h"
 #include "ThinXamlAppSwitcherHost.h"
 #include "ui/shared/ThemeManager.h"
 #include "MainView.h"
@@ -67,6 +68,13 @@ private:
     void RevealNow();
     void CancelPendingReveal();
     void PrewarmSwitcher();
+    // 卡片拖出抓起阈值后把拖动交给代理窗口：显示代理、隐藏切换器，再异步启动系统移动循环。
+    bool HandOffDragToProxy(const touchrev::appswitcher::MainView::ItemDragOut& dragOut);
+    void StartPendingWindowDrag();
+    // 把代理拿到的系统排列结果搬到真实窗口上。
+    void ApplyDragProxyResult(const touchrev::appswitcher::DragProxyWindow::Result& result);
+    // 取消拖动期间对真实窗口的 shell 隐藏。
+    void ReleaseTargetCloak();
     void DispatchGestureAction(const InputController::RawInputResult& inputResult);
     bool HandleKeyDown(WPARAM key);
     HMONITOR ResolveTargetMonitor(const POINT* touchCenter = nullptr) const;
@@ -104,6 +112,8 @@ private:
     bool isPrewarmed_ = false;
     bool gestureTimerActive_ = false;
     bool gestureInputSuspended_ = false;
+    touchrev::appswitcher::DragProxyWindow dragProxy_;
+    HWND shellCloakedTarget_ = nullptr;
     bool revealPending_ = false;
     int pendingRevealFrames_ = 0;
     winrt::event_token renderingToken_{};

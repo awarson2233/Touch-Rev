@@ -43,8 +43,8 @@ public:
         double scale,
         double paddingDip,
         double itemGapDip,
-        double titleRowWeight,
-        double contentRowWeight,
+        double titleHeightDip,
+        double cardBorderDip,
         double minAspect,
         double maxAspect);
 

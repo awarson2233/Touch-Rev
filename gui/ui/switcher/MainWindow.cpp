@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <dwmapi.h>
 #include <sstream>
+#include <utility>
 #include <vector>
 #include <windowsx.h>
 
@@ -28,6 +29,12 @@ constexpr UINT kRevealFallbackMs = 120;
 
 // 启动后预热切换器视觉树（解析卡片模板、建立缩略图），让首次呼出走热路径。
 constexpr UINT kPrewarmMessage = WM_APP + 1;
+
+// 卡片拖出后启动目标窗口的系统移动循环；放到消息队列里做，不在 XAML 指针回调中进入模态循环。
+constexpr UINT kStartWindowDragMessage = WM_APP + 2;
+
+// 空闲时预备拖动代理（窗口、XAML 岛、卡片模板），拖出卡片时不再现场创建。
+constexpr UINT kPrepareDragProxyMessage = WM_APP + 3;
 
 #if defined(WM_DWMCOMPOSITIONCHANGED)
 constexpr UINT kWmDwmCompositionChanged = WM_DWMCOMPOSITIONCHANGED;
@@ -278,6 +285,14 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         PrewarmSwitcher();
         return 0;
 
+    case kStartWindowDragMessage:
+        StartPendingWindowDrag();
+        return 0;
+
+    case kPrepareDragProxyMessage:
+        dragProxy_.Prepare(instance_);
+        return 0;
+
     case WM_INPUT:
     {
         if (!touchrev::settings::Current().gestureEnabled)
@@ -461,6 +476,12 @@ HRESULT MainWindow::OnCreate()
         touchrev::appswitcher::ActivateWindow(targetHwnd, releasePoint, targetWorkAreaPx_);
         Hide();
     });
+    appSwitcherMainView_.SetItemDragOutCallback([this](const touchrev::appswitcher::MainView::ItemDragOut& dragOut) {
+        return HandOffDragToProxy(dragOut);
+    });
+    dragProxy_.SetFinishedCallback([this](const touchrev::appswitcher::DragProxyWindow::Result& result) {
+        ApplyDragProxyResult(result);
+    });
     appSwitcherMainView_.SetItemCloseRequestedCallback([](HWND targetHwnd) {
         return touchrev::appswitcher::RequestCloseWindow(targetHwnd);
     });
@@ -494,6 +515,8 @@ void MainWindow::PrewarmSwitcher()
     appSwitcherMainView_.EnsureLayoutCommitted();
     appSwitcherMainView_.ResetSelection();
     isSyncingLayout_ = wasSyncing;
+
+    dragProxy_.Prepare(instance_);
 }
 
 void MainWindow::OnDestroy()
@@ -501,6 +524,8 @@ void MainWindow::OnDestroy()
     CancelPendingReveal();
     KillTimer(hwnd_, kGestureTimerId);
     gestureTimerActive_ = false;
+    dragProxy_.Destroy();
+    ReleaseTargetCloak();
     appSwitcherMainView_.Shutdown();
     xamlHost_.Shutdown();
 
@@ -839,6 +864,86 @@ void MainWindow::Hide()
     pendingLongPressActivation_ = false;
     activationSucceeded_ = false;
     keyboardNavigationEnabled_ = false;
+}
+
+bool MainWindow::HandOffDragToProxy(const touchrev::appswitcher::MainView::ItemDragOut& dragOut)
+{
+    // 触摸/笔的接触绑定在切换器上，必须先转成鼠标拖拽；转换失败就留在切换器里按原方式拖动。
+    if (!dragOut.fromMouse && !touchrev::appswitcher::ConvertPrimaryPointerToMouseDrag())
+    {
+        return false;
+    }
+
+    if (!dragProxy_.Show(instance_, dragOut.hwnd, dragOut.cardRect, dragOut.grabPoint, dragOut.pointer))
+    {
+        return false;
+    }
+
+    // 真实窗口在拖动期间由 shell 隐藏：窗口已被"拎起"，也不能作为另一个窗口出现在 Snap Bar 的组合建议里。
+    if (touchrev::appswitcher::SetShellCloak(dragOut.hwnd, true))
+    {
+        shellCloakedTarget_ = dragOut.hwnd;
+    }
+
+    // 切换器是全屏置顶窗口，先隐藏，后续鼠标输入才会落到代理上。
+    Hide();
+    PostMessageW(hwnd_, kStartWindowDragMessage, 0, 0);
+    return true;
+}
+
+void MainWindow::StartPendingWindowDrag()
+{
+    // 交接期间指针可能已经移动，以当前光标位置为起点。
+    POINT cursor{};
+    GetCursorPos(&cursor);
+    if (dragProxy_.StartMove(cursor))
+    {
+        return;
+    }
+
+    const HWND target = dragProxy_.Target();
+    dragProxy_.Destroy();
+    if (target)
+    {
+        touchrev::appswitcher::ActivateWindow(target, cursor, targetWorkAreaPx_);
+    }
+    ReleaseTargetCloak();
+}
+
+void MainWindow::ReleaseTargetCloak()
+{
+    if (const HWND target = std::exchange(shellCloakedTarget_, nullptr))
+    {
+        touchrev::appswitcher::SetShellCloak(target, false);
+    }
+}
+
+void MainWindow::ApplyDragProxyResult(const touchrev::appswitcher::DragProxyWindow::Result& result)
+{
+    // 用过的代理随后被销毁，空闲时预备下一个。
+    PostMessageW(hwnd_, kPrepareDragProxyMessage, 0, 0);
+
+    using Kind = touchrev::appswitcher::DragProxyWindow::ResultKind;
+    switch (result.kind)
+    {
+    case Kind::Maximized:
+        if (IsIconic(result.target))
+        {
+            ShowWindow(result.target, SW_RESTORE);
+        }
+        ShowWindow(result.target, SW_MAXIMIZE);
+        SetForegroundWindow(result.target);
+        break;
+    case Kind::Arranged:
+        touchrev::appswitcher::PlaceWindowVisibleRect(result.target, result.arrangedRect);
+        break;
+    case Kind::Moved:
+        touchrev::appswitcher::ActivateWindow(result.target, result.releasePoint, targetWorkAreaPx_);
+        break;
+    }
+
+    // 摆好位置之后再取消隐藏，窗口直接出现在新位置，不会在原处闪一下。
+    ReleaseTargetCloak();
 }
 
 void MainWindow::ToggleSwitcher()

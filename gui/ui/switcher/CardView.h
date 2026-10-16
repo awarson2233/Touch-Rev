@@ -33,7 +33,6 @@ public:
     winrt::Windows::UI::Xaml::Media::CompositeTransform transform{nullptr};
     winrt::Windows::UI::Xaml::Controls::Grid layoutGrid{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border mainCard{nullptr};
-    winrt::Windows::UI::Xaml::Controls::Border titleBorder{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock title{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock defaultIcon{nullptr};
     winrt::Windows::UI::Xaml::Controls::Image appIcon{nullptr};
@@ -49,10 +48,8 @@ public:
     HRESULT thumbnailError = S_OK;
     bool thumbnailFailed = false;
     bool visible = false;
-    bool hovered = false;
     bool pressed = false;
     bool grabbed = false;
-    bool closeButtonHovered = false;
     static std::unique_ptr<CardView> Create(
         size_t index,
         CardCallbacks callbacks);
@@ -60,8 +57,8 @@ public:
     CardView() = default;
     ~CardView() { Destroy(); }
 
-    double TitleRowWeight() const { return titleRowWeight_; }
-    double ContentRowWeight() const { return contentRowWeight_; }
+    double TitleHeightDip() const { return titleHeightDip_; }
+    double BorderDip() const { return borderDip_; }
 
     CardView(CardView&&) noexcept = default;
     CardView& operator=(CardView&&) noexcept = default;
@@ -74,7 +71,7 @@ public:
         size_t index,
         CardCallbacks callbacks);
 
-    void ApplyRowWeights();
+    void LoadTemplateMetrics();
     void ApplyTheme(bool active = true);
     void ApplyInteractionState();
     void ClearThumbnail();
@@ -82,7 +79,6 @@ public:
     void SetRootVisibility(bool isVisible);
     void AssignWindow(HWND newHwnd);
     void ApplyTitle(const std::wstring& titleText, size_t fallbackOrdinal);
-    void ApplyCloseButtonWidth(double widthDip);
     void EnsureThumbnail(
         touchrev::thumbnail::PrivateThumbnailManager& thumbnailManager,
         double widthDip,
@@ -105,8 +101,9 @@ private:
     void Destroy();
     void LoadAppIcon();
 
-    double titleRowWeight_ = 1.8;
-    double contentRowWeight_ = 8.2;
+    // 取自卡片模板：标题行固定高度与卡片描边宽度，单位 DIP。
+    double titleHeightDip_ = 40.0;
+    double borderDip_ = 1.0;
     double pressedScale_ = 0.985;
     double grabbedScale_ = 0.90;
 };

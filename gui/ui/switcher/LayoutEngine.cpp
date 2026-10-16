@@ -91,8 +91,8 @@ LayoutResult LayoutEngine::Calculate(
     double scale,
     double paddingDip,
     double itemGapDip,
-    double titleRowWeight,
-    double contentRowWeight,
+    double titleHeightDip,
+    double cardBorderDip,
     double minAspect,
     double maxAspect)
 {
@@ -109,12 +109,10 @@ LayoutResult LayoutEngine::Calculate(
     const double safeScale = std::max(0.01, scale);
     const double paddingPx = paddingDip * safeScale;
     const double gapPx = itemGapDip * safeScale;
-    const double borderPx = 2.0 * safeScale;
-
-    // 卡片模板按星号比例分配标题行与内容行，标题高度必须随缩略图高度等比变化，
-    // 内容区才正好是窗口的宽高比。
-    const double safeContentWeight = contentRowWeight > 0.0 ? contentRowWeight : 1.0;
-    const double titleRatio = std::max(0.0, titleRowWeight) / safeContentWeight;
+    // 卡片 = 两侧描边 + 缩略图区（宽高比等于窗口），竖直方向再加固定高度的标题行。
+    // 标题行与描边在模板里是 DIP，按当前 DPI 换算成像素，缩略图区才正好是窗口的宽高比。
+    const double borderPx = 2.0 * std::max(0.0, cardBorderDip) * safeScale;
+    const double titlePx = std::max(0.0, titleHeightDip) * safeScale;
 
     std::vector<double> aspects;
     aspects.reserve(count);
@@ -147,13 +145,13 @@ LayoutResult LayoutEngine::Calculate(
             {
                 aspectSum += aspects[index++];
             }
-            const double rowGaps = gapPx * static_cast<double>(rowLen - 1);
-            heightByWidth = std::min(heightByWidth, (availableWidth - rowGaps) / std::max(0.01, aspectSum));
+            const double rowFixed = gapPx * static_cast<double>(rowLen - 1) + borderPx * static_cast<double>(rowLen);
+            heightByWidth = std::min(heightByWidth, (availableWidth - rowFixed) / std::max(0.01, aspectSum));
         }
 
         const double rows = static_cast<double>(rowCount);
         const double heightByHeight =
-            (availableHeight - gapPx * (rows - 1.0) - borderPx * rows) / (rows * (1.0 + titleRatio));
+            (availableHeight - gapPx * (rows - 1.0) - (borderPx + titlePx) * rows) / rows;
 
         candidate.thumbHeight = std::max(1.0, std::min({thumbHeightCap, heightByWidth, heightByHeight}));
         if (best.rowCounts.empty() || candidate.thumbHeight > best.thumbHeight * 1.02)
@@ -164,7 +162,7 @@ LayoutResult LayoutEngine::Calculate(
 
     // 按选中的方案摆放：所有卡片同高，每行水平居中，行间等距。
     const double thumbHeight = best.thumbHeight;
-    const double itemHeight = std::round(thumbHeight * (1.0 + titleRatio) + borderPx);
+    const double itemHeight = std::round(thumbHeight + titlePx + borderPx);
 
     std::vector<double> rowWidths;
     rowWidths.reserve(best.rowCounts.size());
@@ -175,7 +173,7 @@ LayoutResult LayoutEngine::Calculate(
         double rowWidth = gapPx * static_cast<double>(rowLen - 1);
         for (size_t c = 0; c < rowLen; ++c)
         {
-            rowWidth += std::round(thumbHeight * aspects[index++]);
+            rowWidth += std::round(thumbHeight * aspects[index++] + borderPx);
         }
         rowWidths.push_back(rowWidth);
         maxRowWidth = std::max(maxRowWidth, rowWidth);
@@ -189,7 +187,7 @@ LayoutResult LayoutEngine::Calculate(
         double curX = (maxRowWidth - rowWidths[r]) / 2.0;
         for (size_t c = 0; c < best.rowCounts[r]; ++c)
         {
-            const double itemWidth = std::round(thumbHeight * aspects[index]);
+            const double itemWidth = std::round(thumbHeight * aspects[index] + borderPx);
             const LONG left = static_cast<LONG>(std::lround(curX + paddingPx));
             const LONG top = static_cast<LONG>(std::lround(curY + paddingPx));
             result.items[index].rectPx = {

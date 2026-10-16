@@ -9,6 +9,7 @@
 #include <win32acrylic/composition_acrylic.h>
 
 #include <winrt/base.h>
+#include <winrt/Windows.Devices.Input.h>
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <winrt/Windows.UI.Input.h>
@@ -274,6 +275,11 @@ void MainView::SetItemDragReleasedCallback(std::function<void(HWND, POINT)> call
     itemDragReleasedCallback_ = std::move(callback);
 }
 
+void MainView::SetItemDragOutCallback(std::function<bool(const ItemDragOut&)> callback)
+{
+    itemDragOutCallback_ = std::move(callback);
+}
+
 void MainView::SetItemCloseRequestedCallback(std::function<bool(HWND)> callback)
 {
     itemCloseRequestedCallback_ = std::move(callback);
@@ -493,13 +499,12 @@ void MainView::UpdateContainerAcrylicBrush()
 
     try
     {
-        double blurAmount = 80.0;
+        double blurAmount = 30.0;
         double noiseOpacity = 0.02;
-        double tintOpacity = isWindowActive_ ? 0.25 : 0.55;
-        double luminosityOpacity = 0.8;
-        double saturation = 1.25;
-        winrt::Windows::UI::Color tintColor = {0xFF, 0x20, 0x20, 0x20};
-        winrt::Windows::UI::Color luminosityColor = {0xFF, 0x20, 0x20, 0x20};
+        double tintOpacity = 0.0;
+        double luminosityOpacity = 0.64;
+        winrt::Windows::UI::Color tintColor = {0xFF, 0x54, 0x54, 0x54};
+        winrt::Windows::UI::Color luminosityColor = {0xFF, 0x54, 0x54, 0x54};
 
         bool isDark = (themeMode_ == AppThemeMode::Dark);
         winrt::Windows::UI::Xaml::ResourceDictionary themeDict = GetThemeDict(isDark);
@@ -527,13 +532,11 @@ void MainView::UpdateContainerAcrylicBrush()
             {
                 noiseOpacity = winrt::unbox_value<double>(val);
             }
-            
-            const auto opacityKey = isWindowActive_ ? L"AcrylicTintOpacity" : L"AcrylicInactiveTintOpacity";
-            if (auto val = GetThemeResource(opacityKey))
+            if (auto val = GetThemeResource(L"AcrylicTintOpacity"))
             {
                 tintOpacity = winrt::unbox_value<double>(val);
             }
-            
+
             if (auto val = GetThemeResource(L"AcrylicTintColor"))
             {
                 tintColor = winrt::unbox_value<winrt::Windows::UI::Color>(val);
@@ -549,23 +552,18 @@ void MainView::UpdateContainerAcrylicBrush()
             {
                 luminosityOpacity = winrt::unbox_value<double>(val);
             }
-
-            if (auto val = GetThemeResource(L"AcrylicSaturation"))
-            {
-                saturation = winrt::unbox_value<double>(val);
-            }
         }
 
+        // 与 XAML AcrylicBrush 同一套 luminosity 配方（模糊 → luminosity 色 → tint 色 → 噪点），
+        // 设置了 TintLuminosityOpacity 时 luminosity 色就是 tint 色按该不透明度取用。
         auto compositor = containerAcrylicVisual_.Compositor();
         win32acrylic::AcrylicBrushOptions options{};
-        options.material = win32acrylic::AcrylicMaterial::LegacyAcrylic;
+        options.material = win32acrylic::AcrylicMaterial::Acrylic;
         options.backdropSource = win32acrylic::BackdropSource::HostBackdrop;
         options.tintColor = ToAcrylicColor(tintColor, tintOpacity);
         options.luminosityColor = ToAcrylicColor(luminosityColor, luminosityOpacity);
         options.blurAmount = static_cast<float>(blurAmount);
-        options.legacyBlurAmount = static_cast<float>(blurAmount);
         options.noiseOpacity = static_cast<float>(noiseOpacity);
-        options.saturation = static_cast<float>(saturation);
         containerAcrylicVisual_.Brush(win32acrylic::CreateAcrylicBrush(compositor, options));
 
         if (appSwitcherContainer_)
@@ -619,7 +617,6 @@ void MainView::ResetInteractionState()
 
     for (auto& item : cards_)
     {
-        item->hovered = false;
         item->pressed = false;
         item->grabbed = false;
         if (item->root)
@@ -668,6 +665,46 @@ void MainView::BeginGrab(size_t itemIndex)
         item->ApplyInteractionState();
     }
     UpdateSelectionVisual();
+}
+
+bool MainView::TryHandOffDrag(winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args, PointDip pointerDip)
+{
+    if (!itemDragOutCallback_ || activeDragItemIndex_ >= cards_.size())
+    {
+        return false;
+    }
+
+    auto& item = *cards_[activeDragItemIndex_];
+    if (!item.hwnd)
+    {
+        return false;
+    }
+
+    // 抓起阈值之前卡片还停在布局位置上；代理按最初按下的点对齐到指针下，保持手指在卡片上的相对位置。
+    ItemDragOut dragOut;
+    dragOut.hwnd = item.hwnd;
+    const POINT topLeft = DipPointToScreenPixel(item.layoutPosition);
+    const POINT bottomRight = DipPointToScreenPixel({
+        item.layoutPosition.x + item.layoutSize.width,
+        item.layoutPosition.y + item.layoutSize.height});
+    dragOut.cardRect = {topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
+    dragOut.grabPoint = DipPointToScreenPixel(pressPointDip_);
+    dragOut.pointer = DipPointToScreenPixel(pointerDip);
+    dragOut.fromMouse =
+        args.Pointer().PointerDeviceType() == winrt::Windows::Devices::Input::PointerDeviceType::Mouse;
+
+    // 回调在指针仍被本线程持有时执行，触摸/笔才能被转成鼠标拖拽交给移动循环。
+    if (!itemDragOutCallback_(dragOut))
+    {
+        return false;
+    }
+
+    if (item.root)
+    {
+        item.root.ReleasePointerCapture(args.Pointer());
+    }
+    ResetInteractionState();
+    return true;
 }
 
 void MainView::FinishPressedItem(size_t itemIndex, PointDip releasePoint)
@@ -928,7 +965,6 @@ void MainView::ProcessItemPressed(size_t index, winrt::Windows::UI::Xaml::Input:
     xamlDragOffsetX_ = logicalPoint.x - cards_[index]->layoutPosition.x;
     xamlDragOffsetY_ = logicalPoint.y - cards_[index]->layoutPosition.y;
     cards_[index]->pressed = true;
-    cards_[index]->hovered = false;
     cards_[index]->ApplyInteractionState();
     cards_[index]->root.CapturePointer(args.Pointer());
     args.Handled(true);
@@ -950,6 +986,11 @@ void MainView::ProcessItemMoved(winrt::Windows::UI::Xaml::Input::PointerRoutedEv
     constexpr double dragThresholdDip = 10.0;
     if (xamlPointerPressed_ && touchrev::common::Distance(logicalPoint, pressPointDip_) > dragThresholdDip)
     {
+        if (TryHandOffDrag(args, logicalPoint))
+        {
+            args.Handled(true);
+            return;
+        }
         BeginGrab(activeDragItemIndex_);
     }
 
@@ -1180,9 +1221,13 @@ void MainView::UpdateFocusRingStyle()
         return;
     }
 
-    // 参照 Win11 Alt+Tab：外层为主题强调色，内层为白色（取 WinUI 浅色主题 ControlFillColorDefault #B3FFFFFF），两种主题一致。
-    focusAccentBrush_.Color(SystemAccentColor(winrt::Windows::UI::ViewManagement::UIColorType::Accent));
-    focusInnerBrush_.Color({0xB3, 0xFF, 0xFF, 0xFF});
+    // 取自系统 Alt+Tab 的焦点视觉：外层 FocusVisualPrimaryBrushThemed（暗色 AccentLight2、亮色 AccentDark1），
+    // 内层为系统焦点副描边 FocusStrokeColorInner（暗色 #B3000000、亮色 #B3FFFFFF）。
+    using winrt::Windows::UI::ViewManagement::UIColorType;
+    const bool dark = themeMode_ == AppThemeMode::Dark;
+    focusAccentBrush_.Color(SystemAccentColor(dark ? UIColorType::AccentLight2 : UIColorType::AccentDark1));
+    focusInnerBrush_.Color(dark ? winrt::Windows::UI::Color{0xB3, 0x00, 0x00, 0x00}
+                                : winrt::Windows::UI::Color{0xB3, 0xFF, 0xFF, 0xFF});
 }
 
 void MainView::HideFocusRing(bool animate)
@@ -1255,7 +1300,7 @@ void MainView::UpdateSelectionVisual(bool animate)
     const float stroke = static_cast<float>(FocusResource(L"StrokeDip", 4.0));
     const float innerStroke = static_cast<float>(FocusResource(L"InnerStrokeDip", 2.0));
     const float accentWidth = stroke + static_cast<float>(FocusResource(L"GrowMaxDip", 5.0));
-    // 从卡片边缘向外：留空 → 白色内圈 → 强调色；outerInflation 为强调色外沿（静止时）到卡片边缘的距离。
+    // 从卡片边缘向外：留空 → 内圈 → 强调色；outerInflation 为强调色外沿（静止时）到卡片边缘的距离。
     // 各圆角 = 卡片圆角 + 该线到卡片边缘的距离，保证与卡片同心；描边几何取中线。
     const float outerInflation = gap + innerStroke + stroke;
     const float accentCenterInflation = gap + innerStroke + accentWidth * 0.5f;
@@ -1334,8 +1379,8 @@ void MainView::ApplyLayout(
     double itemGapDip = 32.0;
     double minAspect = 0.4;
     double maxAspect = 2.5;
-    double titleRowWeight = 1.8;
-    double contentRowWeight = 8.2;
+    double titleHeightDip = 40.0;
+    double cardBorderDip = 1.0;
 
     if (root_)
     {
@@ -1361,8 +1406,8 @@ void MainView::ApplyLayout(
     EnsureItemCount(windows.size());
     if (!cards_.empty() && cards_[0])
     {
-        titleRowWeight = cards_[0]->TitleRowWeight();
-        contentRowWeight = cards_[0]->ContentRowWeight();
+        titleHeightDip = cards_[0]->TitleHeightDip();
+        cardBorderDip = cards_[0]->BorderDip();
     }
 
     const double safeScale = std::max(0.01, scale);
@@ -1381,8 +1426,8 @@ void MainView::ApplyLayout(
         safeScale,
         paddingDip,
         itemGapDip,
-        titleRowWeight,
-        contentRowWeight,
+        titleHeightDip,
+        cardBorderDip,
         minAspect,
         maxAspect);
     contentBoundsDip_ = {

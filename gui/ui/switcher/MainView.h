@@ -42,6 +42,18 @@ public:
     void SetMissedInputCallback(std::function<void()> callback);
     void SetItemActivatedCallback(std::function<void(HWND)> callback);
     void SetItemDragReleasedCallback(std::function<void(HWND, POINT)> callback);
+    struct ItemDragOut
+    {
+        HWND hwnd = nullptr;
+        // 以下均为屏幕像素：卡片矩形、最初按在卡片上的点、当前指针位置。
+        RECT cardRect{};
+        POINT grabPoint{};
+        POINT pointer{};
+        bool fromMouse = false;
+    };
+
+    // 卡片被拖出抓起阈值时调用；返回 true 表示拖动已交给系统移动循环，切换器不再继续这次拖动。
+    void SetItemDragOutCallback(std::function<bool(const ItemDragOut&)> callback);
     void SetItemCloseRequestedCallback(std::function<bool(HWND)> callback);
     bool MoveSelection(int stepX, int stepY, bool allowWrap = true);
     bool MoveSelectionNext();
@@ -74,6 +86,7 @@ private:
     bool SetSelectedIndex(size_t index);
     void ResetInteractionState();
     void BeginGrab(size_t itemIndex);
+    bool TryHandOffDrag(winrt::Windows::UI::Xaml::Input::PointerRoutedEventArgs const& args, PointDip pointerDip);
     void FinishPressedItem(size_t itemIndex, PointDip releasePoint);
     void HandleItemCloseRequested(size_t itemIndex);
     POINT DipPointToScreenPixel(PointDip point) const;
@@ -116,6 +129,7 @@ private:
     std::function<void()> missedInputCallback_;
     std::function<void(HWND)> itemActivatedCallback_;
     std::function<void(HWND, POINT)> itemDragReleasedCallback_;
+    std::function<bool(const ItemDragOut&)> itemDragOutCallback_;
     std::function<bool(HWND)> itemCloseRequestedCallback_;
     std::vector<HWND> dismissedHwnds_;
     AppThemeMode themeMode_ = AppThemeMode::Dark;

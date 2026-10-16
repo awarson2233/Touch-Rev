@@ -19,15 +19,15 @@
             x:Name="AppSwitcherContainer"
             Canvas.ZIndex="1"
             Background="{ThemeResource ControlFillColorTransparentBrush}"
-            CornerRadius="12" />
+            CornerRadius="8" />
 
         <!-- 容器描边：亚克力是挂在容器上的子 Visual，会盖住容器自身的 Border，所以描边单独叠在其上、卡片（ZIndex=10）之下 -->
         <Border
             x:Name="AppSwitcherStroke"
             Canvas.ZIndex="2"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderBrush="{ThemeResource SurfaceStrokeColorDefaultBrush}"
             BorderThickness="1"
-            CornerRadius="12"
+            CornerRadius="8"
             IsHitTestVisible="False" />
 
         <!-- 选择框宿主：铺满画布、位于卡片（ZIndex=10）之上，选择框本身由 MainView 用 Composition ShapeVisual 绘制 -->
@@ -36,9 +36,9 @@
             Canvas.ZIndex="11"
             IsHitTestVisible="False">
             <Border.Resources>
-                <!-- 卡片边缘到内层描边的留空，透出后方亚克力 -->
-                <x:Double x:Key="InflationDip">6</x:Double>
-                <!-- 内层白色描边宽度 -->
+                <!-- 卡片边缘到内层描边的留空，透出后方亚克力；与内外描边合计 10，对应系统 Alt+Tab 的 FocusVisualMargin=-10 -->
+                <x:Double x:Key="InflationDip">4</x:Double>
+                <!-- 内层描边宽度（系统焦点视觉的副描边） -->
                 <x:Double x:Key="InnerStrokeDip">2</x:Double>
                 <!-- 外层主题强调色静止宽度；生长时内沿不动，只有外沿向手指方向加宽 -->
                 <x:Double x:Key="StrokeDip">4</x:Double>
