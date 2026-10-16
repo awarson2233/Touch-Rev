@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="hookdll">
+      <UniqueIdentifier>{CE8944FD-BD31-48C0-BCF2-944723C7DE8E}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="hookdll\dbghelp_symbol_provider.h">
+      <Filter>hookdll</Filter>
+    </ClInclude>
+    <ClInclude Include="hookdll\direct_hook_resolver.h">
+      <Filter>hookdll</Filter>
+    </ClInclude>
+    <ClInclude Include="hookdll\hook_runtime.h">
+      <Filter>hookdll</Filter>
+    </ClInclude>
+    <ClInclude Include="hookdll\twinui_gesture_table_patch.h">
+      <Filter>hookdll</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="hookdll\dbghelp_symbol_provider.cpp">
+      <Filter>hookdll</Filter>
+    </ClCompile>
+    <ClCompile Include="hookdll\direct_hook_resolver.cpp">
+      <Filter>hookdll</Filter>
+    </ClCompile>
+    <ClCompile Include="hookdll\dllmain.cpp">
+      <Filter>hookdll</Filter>
+    </ClCompile>
+    <ClCompile Include="hookdll\hook_runtime.cpp">
+      <Filter>hookdll</Filter>
+    </ClCompile>
+    <ClCompile Include="hookdll\twinui_gesture_table_patch.cpp">
+      <Filter>hookdll</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

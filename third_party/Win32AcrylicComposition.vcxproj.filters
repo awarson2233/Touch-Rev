@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{6B648C17-BE68-45F4-A0C3-E9A2E8055422}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="src">
+      <UniqueIdentifier>{8BF218A1-9878-43C6-9EE6-7C1683E106D7}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="Win32Acrylic\include\win32acrylic\composition_acrylic.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="Win32Acrylic\include\win32acrylic\win32acrylic.h">
+      <Filter>include</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="Win32Acrylic\src\composition_acrylic.cpp">
+      <Filter>src</Filter>
+    </ClCompile>
+  </ItemGroup>
+</Project>

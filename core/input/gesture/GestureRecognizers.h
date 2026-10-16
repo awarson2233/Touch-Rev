@@ -21,7 +21,7 @@ class ThreeFingerLongPressRecognizer
 {
 public:
     bool Enabled = true;
-    double LongPressDurationMs = 400.0;
+    double LongPressDurationMs = 200.0;
     double MaxStartMovement = 40.0;  // 0.1mm
 
     void OnBegin(const GestureContext& context);
@@ -38,12 +38,23 @@ private:
         Triggered,
     };
 
+    struct TrackedPosition
+    {
+        DWORD contactId = 0;
+        Point position{};
+    };
+
     double HardCancelMovementLimit() const;
     double TriggerMovementLimit(double elapsedMs) const;
+    // 以每根手指自身的位移求平均，手指增减不会让中心点跳变成一次虚假位移。
+    Point ConsumeContactDelta(const GestureContext& context);
+    void RebaseContacts(const GestureContext& context);
 
     State state_ = State::Idle;
-    Point lastCenter_{};
     std::int64_t triggerStartTimestamp_ = 0;
+    std::vector<TrackedPosition> trackedPositions_;
+    // 触发时取几何中心，之后只按各指位移平均值推进。
+    Point virtualCenter_{};
 };
 
 class MultiFingerTapRecognizer

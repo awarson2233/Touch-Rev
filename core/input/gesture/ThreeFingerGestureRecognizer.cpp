@@ -239,7 +239,10 @@ std::optional<touchrev::gesture::GestureRecognitionResult> ThreeFingerGestureRec
         return std::nullopt;
     }
 
-    if (session_->IsFingerDropToleranceExpired(MinimumFingerQuorum()))
+    // 长按已触发（切换器正在导航）时掉指不结束会话：剩余手指继续推动虚拟光标，只有全部抬起才结束。
+    const bool longPressTriggered = session_->GestureRecognized &&
+                                    session_->ActiveGestureType == touchrev::gesture::GestureType::ThreeFingerLongPress;
+    if (!longPressTriggered && session_->IsFingerDropToleranceExpired(MinimumFingerQuorum()))
     {
         return FinalizeSession(touchrev::gesture::GestureEndReason::QuorumLostTimeout);
     }

@@ -19,21 +19,36 @@
             x:Name="AppSwitcherContainer"
             Canvas.ZIndex="1"
             Background="{ThemeResource ControlFillColorTransparentBrush}"
-            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
-            BorderThickness="1"
             CornerRadius="12" />
 
+        <!-- 容器描边：亚克力是挂在容器上的子 Visual，会盖住容器自身的 Border，所以描边单独叠在其上、卡片（ZIndex=10）之下 -->
+        <Border
+            x:Name="AppSwitcherStroke"
+            Canvas.ZIndex="2"
+            BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
+            BorderThickness="1"
+            CornerRadius="12"
+            IsHitTestVisible="False" />
+
+        <!-- 选择框宿主：铺满画布、位于卡片（ZIndex=10）之上，选择框本身由 MainView 用 Composition ShapeVisual 绘制 -->
         <Border
             x:Name="FocusBorder"
-            BorderBrush="{ThemeResource AccentFillColorDefaultBrush}"
-            BorderThickness="4"
-            Canvas.ZIndex="2"
-            CornerRadius="20"
-            IsHitTestVisible="False"
-            Visibility="Collapsed"
-            Background="{ThemeResource AccentFillColorSecondaryBrush}">
+            Canvas.ZIndex="11"
+            IsHitTestVisible="False">
             <Border.Resources>
-                <x:Double x:Key="InflationDip">10</x:Double>
+                <!-- 卡片边缘到内层描边的留空，透出后方亚克力 -->
+                <x:Double x:Key="InflationDip">6</x:Double>
+                <!-- 内层白色描边宽度 -->
+                <x:Double x:Key="InnerStrokeDip">2</x:Double>
+                <!-- 外层主题强调色静止宽度；生长时内沿不动，只有外沿向手指方向加宽 -->
+                <x:Double x:Key="StrokeDip">4</x:Double>
+                <!-- 首次出现时从外扩此距离收缩到位 -->
+                <x:Double x:Key="EntranceInflationDip">8</x:Double>
+                <!-- 手势生长：强调色朝手指方向加宽，累积量到达切换阈值时加宽 GrowMaxDip -->
+                <!-- 修改 StrokeDip / InnerStrokeDip / GrowMaxDip 需重启生效（创建时用于确定宽描边宽度） -->
+                <x:Double x:Key="GrowMaxDip">5</x:Double>
+                <!-- 该方向没有下一张卡片时的生长比例，表现为撞墙阻尼 -->
+                <x:Double x:Key="GrowEdgeResistance">0.3</x:Double>
             </Border.Resources>
         </Border>
     </Canvas>

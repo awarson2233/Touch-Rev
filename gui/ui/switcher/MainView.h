@@ -11,6 +11,7 @@
 #include <winrt/Windows.UI.Xaml.Media.h>
 #include <winrt/Windows.UI.Xaml.Input.h>
 #include <winrt/Windows.UI.Composition.h>
+#include <winrt/Windows.Foundation.Numerics.h>
 
 
 #include <functional>
@@ -59,7 +60,16 @@ private:
     void AttachPointerHandlers();
     void UpdateVisibleBoundsAndPositions();
     void EnsureSelectedIndex();
-    void UpdateSelectionVisual();
+    // animate=true 仅用于选中项切换；布局重算时卡片本身是瞬移的，选择框也直接跳到位。
+    void UpdateSelectionVisual(bool animate = false);
+    void CreateFocusRing();
+    void UpdateFocusRingStyle();
+    void HideFocusRing(bool animate);
+    // 外层描边朝 (x, y) 符号所指方向伸出 |x|、|y| DIP；内层描边不动。
+    void SetFocusGrowth(float x, float y, bool animate);
+    // 累积量占阈值的比例 → 生长量；该方向没有下一张卡片时按撞墙阻尼缩小。
+    float GrowthForAxis(double accumulated, double threshold, int stepX, int stepY) const;
+    double FocusResource(const wchar_t* key, double fallback) const;
     bool CanNavigateSelection() const;
     bool SetSelectedIndex(size_t index);
     void ResetInteractionState();
@@ -79,6 +89,7 @@ private:
 
     winrt::Windows::UI::Xaml::Controls::Grid root_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border appSwitcherContainer_{nullptr};
+    winrt::Windows::UI::Xaml::Controls::Border appSwitcherStroke_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Canvas layoutCanvas_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Border focusBorder_{nullptr};
     winrt::Windows::UI::Xaml::FrameworkElement emptyGrid_{nullptr};
@@ -110,6 +121,20 @@ private:
     AppThemeMode themeMode_ = AppThemeMode::Dark;
     winrt::Windows::UI::Composition::SpriteVisual containerAcrylicVisual_{nullptr};
     winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry containerAcrylicClip_{nullptr};
+    // 选择框：props 的 Offset/Size 为强调色外沿的静止矩形（弹簧动画），Growth 为手势生长量；各几何经表达式绑定到 props。
+    winrt::Windows::UI::Composition::ShapeVisual focusVisual_{nullptr};
+    winrt::Windows::UI::Composition::CompositionPropertySet focusProps_{nullptr};
+    winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry focusOuterGeometry_{nullptr};
+    winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry focusInnerGeometry_{nullptr};
+    // 裁剪出强调色外沿；外层几何是一条覆盖最大生长量的宽描边，只有内沿是真实边界。
+    winrt::Windows::UI::Composition::CompositionRoundedRectangleGeometry focusClipGeometry_{nullptr};
+    winrt::Windows::UI::Composition::CompositionColorBrush focusAccentBrush_{nullptr};
+    winrt::Windows::UI::Composition::CompositionColorBrush focusInnerBrush_{nullptr};
+    // 上一次的目标外层几何；重复布局给出相同目标时跳过，避免打断正在进行的弹簧。
+    winrt::Windows::Foundation::Numerics::float2 focusTargetOffset_{};
+    winrt::Windows::Foundation::Numerics::float2 focusTargetSize_{};
+    bool focusRingShown_ = false;
+    bool animationsEnabled_ = true;
     touchrev::thumbnail::PrivateThumbnailManager thumbnailManager_;
 
     double gestureAccX_ = 0.0;

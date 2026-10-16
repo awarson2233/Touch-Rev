@@ -313,7 +313,10 @@ LRESULT MainWindow::HandleMessage(UINT message, WPARAM wParam, LPARAM lParam)
         {
             if (touchrev::settings::Current().gestureEnabled)
             {
-                DispatchGestureAction(inputController_.OnGestureTick());
+                for (const InputController::RawInputResult& result : inputController_.OnGestureTick())
+                {
+                    DispatchGestureAction(result);
+                }
             }
             UpdateGestureTimer();
             return 0;
@@ -902,6 +905,8 @@ void MainWindow::DispatchGestureAction(const InputController::RawInputResult& in
         {
             isLongPressNavigating_ = false;
             pendingLongPressActivation_ = isVisible_;
+            // 手势结束时未切换的累积量作废，选择框的生长收回。
+            appSwitcherMainView_.ClearGestureAccumulator();
         }
     }
 

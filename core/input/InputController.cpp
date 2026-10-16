@@ -270,42 +270,69 @@ std::vector<InputController::RawInputResult> InputController::OnRawInput(LPARAM 
     std::vector<RawInputResult> results;
     for (const RawTouchInput::Frame& frame : rawTouchInput_.ProcessRawInput(lParam))
     {
-        // 识别器的 contactId 不区分设备：会话进行中只接受发起会话的那块触摸屏。
-        if (gestureRecognizer_.HasActiveSession() && frame.device != gestureDevice_)
-        {
-            continue;
-        }
-
         const bool allContactsReleased = frame.AllContactsReleased();
         if (!frame.HasTouch() && !allContactsReleased)
         {
             continue;
         }
 
-        if (!gestureRecognizer_.HasActiveSession())
+        // 每块触摸屏走自己的识别器，与焦点、切换器所在屏幕以及另一块屏是否有会话都无关。
+        DeviceGesture& gesture = GetDeviceGesture(frame.device);
+        if (!gesture.recognizer.HasActiveSession())
         {
-            gestureDevice_ = frame.device;
-            gestureGeometry_ = frame.geometry;
+            gesture.geometry = frame.geometry;
         }
 
-        const ThreeFingerGestureRecognizer::Result gestureResult = gestureRecognizer_.ProcessFrame(frame);
-        results.push_back(MapGestureEvent(gestureResult, allContactsReleased));
+        const ThreeFingerGestureRecognizer::Result gestureResult = gesture.recognizer.ProcessFrame(frame);
+        results.push_back(MapGestureEvent(gesture, gestureResult, allContactsReleased));
     }
     return results;
 }
 
-InputController::RawInputResult InputController::OnGestureTick()
+std::vector<InputController::RawInputResult> InputController::OnGestureTick()
 {
     // 无新输入帧时定时推进状态机：静止三指长按到 400ms 才能稳定进入长按。
-    const ThreeFingerGestureRecognizer::Result gestureResult = gestureRecognizer_.Tick();
-    return MapGestureEvent(gestureResult, false);
+    std::vector<RawInputResult> results;
+    for (const std::unique_ptr<DeviceGesture>& gesture : deviceGestures_)
+    {
+        if (!gesture->recognizer.HasActiveSession())
+        {
+            continue;
+        }
+
+        const ThreeFingerGestureRecognizer::Result gestureResult = gesture->recognizer.Tick();
+        results.push_back(MapGestureEvent(*gesture, gestureResult, false));
+    }
+    return results;
+}
+
+bool InputController::NeedsGestureTick() const
+{
+    return std::any_of(deviceGestures_.begin(), deviceGestures_.end(), [](const std::unique_ptr<DeviceGesture>& gesture) {
+        return gesture->recognizer.HasActiveSession();
+    });
 }
 
 void InputController::ResetGesture()
 {
     rawTouchInput_.Reset();
-    gestureRecognizer_.Reset();
-    gestureDevice_ = nullptr;
+    deviceGestures_.clear();
+}
+
+InputController::DeviceGesture& InputController::GetDeviceGesture(HANDLE device)
+{
+    const auto existing = std::find_if(deviceGestures_.begin(), deviceGestures_.end(), [device](const std::unique_ptr<DeviceGesture>& gesture) {
+        return gesture->device == device;
+    });
+    if (existing != deviceGestures_.end())
+    {
+        return **existing;
+    }
+
+    auto gesture = std::make_unique<DeviceGesture>();
+    gesture->device = device;
+    deviceGestures_.push_back(std::move(gesture));
+    return *deviceGestures_.back();
 }
 
 void InputController::OnInputDeviceChange(WPARAM wParam, LPARAM lParam)
@@ -317,16 +344,21 @@ void InputController::OnInputDeviceChange(WPARAM wParam, LPARAM lParam)
 
     const HANDLE device = reinterpret_cast<HANDLE>(lParam);
     rawTouchInput_.RemoveDevice(device);
-    if (device == gestureDevice_)
-    {
-        gestureRecognizer_.Reset();
-        gestureDevice_ = nullptr;
-    }
+    std::erase_if(deviceGestures_, [device](const std::unique_ptr<DeviceGesture>& gesture) {
+        return gesture->device == device;
+    });
 }
 
-bool InputController::MapGestureCenterToScreen(LONG rawX, LONG rawY, bool hasRaw, POINT& screenPoint, int& rotation) const
+bool InputController::MapGestureCenterToScreen(
+    const DeviceGesture& gesture,
+    LONG rawX,
+    LONG rawY,
+    bool hasRaw,
+    POINT& screenPoint,
+    int& rotation) const
 {
-    const RawTouchInput::DisplayMapping mapping = RawTouchInput::QueryDisplayMapping(gestureDevice_);
+    const RawTouchInput::DeviceGeometry& geometry = gesture.geometry;
+    const RawTouchInput::DisplayMapping mapping = RawTouchInput::QueryDisplayMapping(gesture.device);
     rotation = static_cast<int>(mapping.monitor
                                     ? RotationFromMonitor(mapping.monitor)
                                     : RotationFromMonitor(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST)));
@@ -334,18 +366,18 @@ bool InputController::MapGestureCenterToScreen(LONG rawX, LONG rawY, bool hasRaw
     const RECT& rect = mapping.displayRect;
     const LONG width = rect.right - rect.left;
     const LONG height = rect.bottom - rect.top;
-    if (!hasRaw || !gestureGeometry_.logicalValid || width <= 0 || height <= 0)
+    if (!hasRaw || !geometry.logicalValid || width <= 0 || height <= 0)
     {
         return false;
     }
 
     // 先归一化到数字化仪自身方向，再按显示旋转转到屏幕方向；与 LongPressMoved 的增量旋转保持同一约定。
     const double u = std::clamp(
-        static_cast<double>(rawX - gestureGeometry_.logicalMinX) / static_cast<double>(gestureGeometry_.logicalMaxX - gestureGeometry_.logicalMinX),
+        static_cast<double>(rawX - geometry.logicalMinX) / static_cast<double>(geometry.logicalMaxX - geometry.logicalMinX),
         0.0,
         1.0);
     const double v = std::clamp(
-        static_cast<double>(rawY - gestureGeometry_.logicalMinY) / static_cast<double>(gestureGeometry_.logicalMaxY - gestureGeometry_.logicalMinY),
+        static_cast<double>(rawY - geometry.logicalMinY) / static_cast<double>(geometry.logicalMaxY - geometry.logicalMinY),
         0.0,
         1.0);
 
@@ -380,6 +412,7 @@ bool InputController::MapGestureCenterToScreen(LONG rawX, LONG rawY, bool hasRaw
 }
 
 InputController::RawInputResult InputController::MapGestureEvent(
+    DeviceGesture& gesture,
     const ThreeFingerGestureRecognizer::Result& gestureResult,
     bool allContactsReleased)
 {
@@ -391,7 +424,7 @@ InputController::RawInputResult InputController::MapGestureEvent(
         POINT touchCenter{};
         int rotation = 0;
         const bool hasTouchCenter = MapGestureCenterToScreen(
-            gestureResult.rawCenterX, gestureResult.rawCenterY, gestureResult.hasRawCenter, touchCenter, rotation);
+            gesture, gestureResult.rawCenterX, gestureResult.rawCenterY, gestureResult.hasRawCenter, touchCenter, rotation);
         return {
             .handled = true,
             .action = InputAction::ShowSwitcher,
@@ -406,8 +439,8 @@ InputController::RawInputResult InputController::MapGestureEvent(
         POINT touchCenter{};
         int rotation = 0;
         const bool hasTouchCenter = MapGestureCenterToScreen(
-            gestureResult.rawCenterX, gestureResult.rawCenterY, gestureResult.hasRawCenter, touchCenter, rotation);
-        cachedGestureRotation_ = rotation;
+            gesture, gestureResult.rawCenterX, gestureResult.rawCenterY, gestureResult.hasRawCenter, touchCenter, rotation);
+        gesture.cachedRotation = rotation;
 
         return {
             .handled = true,
@@ -424,7 +457,7 @@ InputController::RawInputResult InputController::MapGestureEvent(
 
         double adjX = dx;
         double adjY = dy;
-        switch (static_cast<ScreenRotation>(cachedGestureRotation_))
+        switch (static_cast<ScreenRotation>(gesture.cachedRotation))
         {
         case ScreenRotation::Rotation0:
             adjX = dx;

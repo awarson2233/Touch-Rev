@@ -26,7 +26,6 @@ GestureRecognitionResult MakeResult(
 void ThreeFingerLongPressRecognizer::OnBegin(const GestureContext& context)
 {
     state_ = State::Pending;
-    lastCenter_ = context.Center();
     triggerStartTimestamp_ = context.CurrentTimestamp();
 }
 
@@ -60,7 +59,8 @@ std::optional<GestureRecognitionResult> ThreeFingerLongPressRecognizer::OnUpdate
             if (distanceFromAnchor <= TriggerMovementLimit(elapsedMs))
             {
                 state_ = State::Triggered;
-                lastCenter_ = context.Center();
+                RebaseContacts(context);
+                virtualCenter_ = context.Center();
                 return MakeResult(GestureType::ThreeFingerLongPress, GesturePhase::Begin, {}, context);
             }
 
@@ -75,10 +75,13 @@ std::optional<GestureRecognitionResult> ThreeFingerLongPressRecognizer::OnUpdate
             return std::nullopt;
         }
 
-        const Point center = context.Center();
-        const Point delta{center.x - lastCenter_.x, center.y - lastCenter_.y};
-        lastCenter_ = center;
-        return MakeResult(GestureType::ThreeFingerLongPress, GesturePhase::Update, delta, context);
+        // 虚拟光标只由各指自身的位移推动：手指抬起只是不再贡献位移，光标不会因几何中心变化而跳动。
+        const Point delta = ConsumeContactDelta(context);
+        virtualCenter_.x += delta.x;
+        virtualCenter_.y += delta.y;
+        GestureRecognitionResult result = MakeResult(GestureType::ThreeFingerLongPress, GesturePhase::Update, delta, context);
+        result.center = virtualCenter_;
+        return result;
     }
     case State::Tracking:
     case State::Idle:
@@ -103,8 +106,48 @@ std::optional<GestureRecognitionResult> ThreeFingerLongPressRecognizer::OnEnd(co
 void ThreeFingerLongPressRecognizer::Reset()
 {
     state_ = State::Idle;
-    lastCenter_ = {};
     triggerStartTimestamp_ = 0;
+    trackedPositions_.clear();
+    virtualCenter_ = {};
+}
+
+Point ThreeFingerLongPressRecognizer::ConsumeContactDelta(const GestureContext& context)
+{
+    // 每个接触事件只有一根手指移动，按当前手指数取平均，一帧内累加后即为整只手的平均位移。
+    Point sum{};
+    bool matched = false;
+    std::vector<TrackedPosition> next;
+    next.reserve(context.Contacts().size());
+    for (const GestureContact& contact : context.Contacts())
+    {
+        const auto previous = std::find_if(trackedPositions_.begin(), trackedPositions_.end(), [id = contact.contactId](const TrackedPosition& item) {
+            return item.contactId == id;
+        });
+        if (previous != trackedPositions_.end())
+        {
+            sum.x += contact.current.x - previous->position.x;
+            sum.y += contact.current.y - previous->position.y;
+            matched = true;
+        }
+        next.push_back({contact.contactId, contact.current});
+    }
+    trackedPositions_ = std::move(next);
+
+    if (!matched)
+    {
+        return {};
+    }
+    const double count = static_cast<double>(context.FingerCount());
+    return {sum.x / count, sum.y / count};
+}
+
+void ThreeFingerLongPressRecognizer::RebaseContacts(const GestureContext& context)
+{
+    trackedPositions_.clear();
+    for (const GestureContact& contact : context.Contacts())
+    {
+        trackedPositions_.push_back({contact.contactId, contact.current});
+    }
 }
 
 double ThreeFingerLongPressRecognizer::HardCancelMovementLimit() const

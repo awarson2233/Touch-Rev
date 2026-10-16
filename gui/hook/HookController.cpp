@@ -477,12 +477,22 @@ OperationResult HookController::Execute(Operation operation, bool userInitiated)
     switch (operation)
     {
     case Operation::Enable:
+    {
+        // 每次系统更新都会多出一个 PDB 版本；启用前裁掉旧版本，正在使用的最新版本不会被动。
+        const auto trim = touchrev::common::pdbcache::Trim();
+        if (trim.removedVersions > 0)
+        {
+            DebugLog(L"[HookController] trimmed " + std::to_wstring(trim.removedVersions) + L" PDB versions, freed " +
+                     touchrev::common::pdbcache::FormatBytes(trim.freedBytes));
+        }
+
         result.succeeded = EnableIn(target, error);
         if (!result.succeeded)
         {
             result.message = L"启用拦截失败:\n" + error;
         }
         break;
+    }
 
     case Operation::Disable:
         result.succeeded = DisableIn(target, result.stopDeferred, error);

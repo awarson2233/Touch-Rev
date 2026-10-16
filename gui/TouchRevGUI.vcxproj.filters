@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="thumbnail">
+      <UniqueIdentifier>{17198CE7-FF0F-4DF3-B8FD-2FA1E0598822}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ui">
+      <UniqueIdentifier>{6573C6F7-2234-4C78-9B7C-54B7EF20AE71}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ui\config">
+      <UniqueIdentifier>{AC4CA4A3-D953-48CD-B7EC-674EF3761ECA}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ui\shared">
+      <UniqueIdentifier>{6DC5B9AC-F051-4091-B780-3331C0130986}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="ui\switcher">
+      <UniqueIdentifier>{B125B6FE-72F2-43AA-B452-16C4D04C5A53}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="blocker">
+      <UniqueIdentifier>{0E04008B-C15E-4B07-A0E5-3A5A65CC0488}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="xaml">
+      <UniqueIdentifier>{6CEF6B92-7AC7-4402-B8E5-DA5A435165E0}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="resources">
+      <UniqueIdentifier>{2E571EFE-5EFA-464A-A4D9-B37D8044B2C8}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="thumbnail\PrivateThumbnailInterfaces.h">
+      <Filter>thumbnail</Filter>
+    </ClInclude>
+    <ClInclude Include="thumbnail\PrivateThumbnailManager.h">
+      <Filter>thumbnail</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\config\ConfigWindow.h">
+      <Filter>ui\config</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\shared\ThemeManager.h">
+      <Filter>ui\shared</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\switcher\CardView.h">
+      <Filter>ui\switcher</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\switcher\LayoutEngine.h">
+      <Filter>ui\switcher</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\switcher\MainWindow.h">
+      <Filter>ui\switcher</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\switcher\MainView.h">
+      <Filter>ui\switcher</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\switcher\ThinXamlAppSwitcherHost.h">
+      <Filter>ui\switcher</Filter>
+    </ClInclude>
+    <ClInclude Include="ui\switcher\WindowController.h">
+      <Filter>ui\switcher</Filter>
+    </ClInclude>
+    <ClInclude Include="..\blocker\injector\inject.h">
+      <Filter>blocker</Filter>
+    </ClInclude>
+    <ClInclude Include="..\blocker\injector\process_find.h">
+      <Filter>blocker</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="thumbnail\PrivateThumbnailManager.cpp">
+      <Filter>thumbnail</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\config\ConfigWindow.cpp">
+      <Filter>ui\config</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\shared\ThemeManager.cpp">
+      <Filter>ui\shared</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\switcher\CardView.cpp">
+      <Filter>ui\switcher</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\switcher\LayoutEngine.cpp">
+      <Filter>ui\switcher</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\switcher\MainWindow.cpp">
+      <Filter>ui\switcher</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\switcher\MainView.cpp">
+      <Filter>ui\switcher</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\switcher\ThinXamlAppSwitcherHost.cpp">
+      <Filter>ui\switcher</Filter>
+    </ClCompile>
+    <ClCompile Include="ui\switcher\WindowController.cpp">
+      <Filter>ui\switcher</Filter>
+    </ClCompile>
+    <ClCompile Include="..\blocker\injector\inject.cpp">
+      <Filter>blocker</Filter>
+    </ClCompile>
+    <ClCompile Include="..\blocker\injector\process_find.cpp">
+      <Filter>blocker</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="TouchRevGUI.rc">
+      <Filter>resources</Filter>
+    </ResourceCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="app.manifest">
+      <Filter>resources</Filter>
+    </None>
+    <None Include="xaml\AppSwitcherRoot.xaml">
+      <Filter>xaml</Filter>
+    </None>
+    <None Include="xaml\Common_themeresources_any.xaml">
+      <Filter>xaml</Filter>
+    </None>
+    <None Include="xaml\ConfigRoot.xaml">
+      <Filter>xaml</Filter>
+    </None>
+    <None Include="xaml\SwitcherItem.xaml">
+      <Filter>xaml</Filter>
+    </None>
+    <None Include="xaml\ThemeResources.xaml">
+      <Filter>xaml</Filter>
+    </None>
+  </ItemGroup>
+</Project>

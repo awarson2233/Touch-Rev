@@ -99,6 +99,8 @@ PDB 缓存路径不是按文件名单独复用，而是按系统 DLL 的 RSDS id
 | 本地 exact path 文件损坏或内容不匹配 | loaded PDB`GUID / Age` 不匹配 DLL                    | 删除本地文件，重新下载并缓存 | `PDB_EXACT_LOAD_MISMATCH`、`PDB_CACHE_INVALID action=redownload` |
 | Microsoft Symbol Server 下载失败     | HTTP / WinHTTP / status code 失败                      | 放弃 patch，返回失败         | `PDB_DOWNLOAD_FAILED`、`READY_FAILED`                            |
 
+系统每次更新 twinui.pcshell.dll 都会多出一个 `<GUIDAge>` 目录，旧目录不再被使用。[PdbCache.cpp](/core/common/PdbCache.cpp) 的 `pdbcache::Trim` 负责设上限：每个 PDB 按目录修改时间只保留最近 `kMaxVersionsPerPdb`（2）个版本，总量仍超过 `kMaxCacheBytes`（256MB）时继续从最旧的版本删起，每个 PDB 的最新版本始终保留（它就是 explorer 当前在用的那份）。[HookController](/gui/hook/HookController.cpp) 在每次执行 Enable 操作、注入之前于工作线程调用它，删除失败的版本留到下次再试，不登记重启删除。
+
 ## Gesture table patch 流程
 
 ```mermaid

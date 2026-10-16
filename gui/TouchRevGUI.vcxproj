@@ -1,0 +1,190 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|ARM64">
+      <Configuration>Debug</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64">
+      <Configuration>Release</Configuration>
+      <Platform>ARM64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <VCProjectVersion>17.0</VCProjectVersion>
+    <Keyword>Win32Proj</Keyword>
+    <ProjectGuid>{B8A7A0C1-2851-4199-B0F7-827C4E1568E6}</ProjectGuid>
+    <RootNamespace>TouchRevGUI</RootNamespace>
+    <WindowsTargetPlatformVersion>10.0</WindowsTargetPlatformVersion>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset Condition="'$(PlatformToolset)' == ''">v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset Condition="'$(PlatformToolset)' == ''">v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset Condition="'$(PlatformToolset)' == ''">v145</PlatformToolset>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset Condition="'$(PlatformToolset)' == ''">v145</PlatformToolset>
+    <WholeProgramOptimization>true</WholeProgramOptimization>
+    <CharacterSet>Unicode</CharacterSet>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="Shared">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Debug|ARM64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets" Condition="'$(Configuration)|$(Platform)'=='Release|ARM64'">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <OutDir>$(SolutionDir)out\bin\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(SolutionDir)out\obj\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <GenerateManifest>false</GenerateManifest>
+    <LocalDebuggerWorkingDirectory>$(OutDir)</LocalDebuggerWorkingDirectory>
+  </PropertyGroup>
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <WarningLevel>Level4</WarningLevel>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp20</LanguageStandard>
+      <MultiProcessorCompilation>true</MultiProcessorCompilation>
+      <ExceptionHandling>Sync</ExceptionHandling>
+      <AdditionalOptions>/FS /Zc:__cplusplus %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalIncludeDirectories>$(ProjectDir);$(SolutionDir)core;$(SolutionDir)blocker;$(SolutionDir)third_party\Win32Acrylic\include;$(WindowsSdkDir)Include\$(WindowsTargetPlatformVersion)\cppwinrt;C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\cppwinrt;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <AdditionalDependencies>user32.lib;gdi32.lib;dwmapi.lib;ole32.lib;runtimeobject.lib;advapi32.lib;shell32.lib;propsys.lib;hid.lib;windowsapp.lib;dcomp.lib;d2d1.lib;d3d11.lib;dxguid.lib;shlwapi.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalOptions>/MANIFEST:NO %(AdditionalOptions)</AdditionalOptions>
+    </Link>
+    <PostBuildEvent>
+      <Command>xcopy /y /d /i "$(ProjectDir)xaml\*.xaml" "$(OutDir)xaml\"</Command>
+      <Message>Deploying XAML assets to target directory...</Message>
+    </PostBuildEvent>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Debug'">
+    <ClCompile>
+      <Optimization>Disabled</Optimization>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <PreprocessorDefinitions>_DEBUG;_WINDOWS;TOUCHREV_BUILD_BLOCKER;UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;_WIN32_WINNT=0x0A00;NTDDI_VERSION=0x0A000000;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)'=='Release'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <FunctionLevelLinking>true</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <PreprocessorDefinitions>NDEBUG;_WINDOWS;TOUCHREV_BUILD_BLOCKER;UNICODE;_UNICODE;NOMINMAX;WIN32_LEAN_AND_MEAN;_WIN32_WINNT=0x0A00;NTDDI_VERSION=0x0A000000;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+    <Link>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='x64'">
+    <ClCompile>
+      <PreprocessorDefinitions>TOUCHREV_ARCH_X64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Platform)'=='ARM64'">
+    <ClCompile>
+      <PreprocessorDefinitions>TOUCHREV_ARCH_ARM64;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+    </ClCompile>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <ClInclude Include="thumbnail\PrivateThumbnailInterfaces.h" />
+    <ClInclude Include="thumbnail\PrivateThumbnailManager.h" />
+    <ClInclude Include="ui\config\ConfigWindow.h" />
+    <ClInclude Include="ui\shared\ThemeManager.h" />
+    <ClInclude Include="ui\switcher\CardView.h" />
+    <ClInclude Include="ui\switcher\LayoutEngine.h" />
+    <ClInclude Include="ui\switcher\MainWindow.h" />
+    <ClInclude Include="ui\switcher\MainView.h" />
+    <ClInclude Include="ui\switcher\ThinXamlAppSwitcherHost.h" />
+    <ClInclude Include="ui\switcher\WindowController.h" />
+    <ClInclude Include="..\blocker\injector\inject.h" />
+    <ClInclude Include="..\blocker\injector\process_find.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="main.cpp" />
+    <ClCompile Include="thumbnail\PrivateThumbnailManager.cpp" />
+    <ClCompile Include="ui\config\ConfigWindow.cpp" />
+    <ClCompile Include="ui\shared\ThemeManager.cpp" />
+    <ClCompile Include="ui\switcher\CardView.cpp" />
+    <ClCompile Include="ui\switcher\LayoutEngine.cpp" />
+    <ClCompile Include="ui\switcher\MainWindow.cpp" />
+    <ClCompile Include="ui\switcher\MainView.cpp" />
+    <ClCompile Include="ui\switcher\ThinXamlAppSwitcherHost.cpp" />
+    <ClCompile Include="ui\switcher\WindowController.cpp" />
+    <ClCompile Include="..\blocker\injector\inject.cpp" />
+    <ClCompile Include="..\blocker\injector\process_find.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="TouchRevGUI.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="app.manifest" />
+    <None Include="xaml\AppSwitcherRoot.xaml" />
+    <None Include="xaml\Common_themeresources_any.xaml" />
+    <None Include="xaml\ConfigRoot.xaml" />
+    <None Include="xaml\SwitcherItem.xaml" />
+    <None Include="xaml\ThemeResources.xaml" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\core\touchrev_core.vcxproj">
+      <Project>{B8A7A0C1-2851-4199-B0F7-827C4E1568E1}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\third_party\Win32AcrylicComposition.vcxproj">
+      <Project>{B8A7A0C1-2851-4199-B0F7-827C4E1568E2}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\blocker\touchrev_blocker_common.vcxproj">
+      <Project>{B8A7A0C1-2851-4199-B0F7-827C4E1568E3}</Project>
+    </ProjectReference>
+    <ProjectReference Include="..\blocker\TouchRevBlockerHook.vcxproj">
+      <Project>{B8A7A0C1-2851-4199-B0F7-827C4E1568E4}</Project>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

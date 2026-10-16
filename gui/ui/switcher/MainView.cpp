@@ -19,8 +19,11 @@
 #include <winrt/Windows.UI.Xaml.Input.h>
 #include <winrt/Windows.UI.Xaml.Markup.h>
 #include <winrt/Windows.UI.Xaml.Media.h>
+#include <winrt/Windows.UI.ViewManagement.h>
+#include <winrt/Windows.Foundation.Numerics.h>
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <sstream>
 #include <utility>
@@ -65,6 +68,62 @@ win32acrylic::Color ToAcrylicColor(winrt::Windows::UI::Color color, double opaci
         static_cast<float>(color.G) / 255.0f,
         static_cast<float>(color.B) / 255.0f,
         alpha};
+}
+
+using winrt::Windows::Foundation::Numerics::float2;
+using winrt::Windows::UI::Composition::CompositionPropertySet;
+
+constexpr std::chrono::milliseconds kFocusFadeInDuration{120};
+constexpr std::chrono::milliseconds kFocusFadeOutDuration{100};
+
+void SetVector2Now(CompositionPropertySet const& props, wchar_t const* name, float2 value)
+{
+    // 属性上若有弹簧在跑，直接 Insert 会被动画覆盖，必须先停掉。
+    props.StopAnimation(name);
+    props.InsertVector2(name, value);
+}
+
+void SpringVector2(CompositionPropertySet const& props, wchar_t const* name, float2 value)
+{
+    // NaturalMotion 动画在运行中被重新启动时会继承当前速度，连续切换能自然衔接。
+    auto spring = props.Compositor().CreateSpringVector2Animation();
+    spring.DampingRatio(0.85f);
+    spring.Period(std::chrono::milliseconds(28));
+    spring.FinalValue(value);
+    props.StartAnimation(name, spring);
+}
+
+void FadeOpacity(winrt::Windows::UI::Composition::Visual const& visual, float to, std::chrono::milliseconds duration)
+{
+    auto fade = visual.Compositor().CreateScalarKeyFrameAnimation();
+    fade.InsertKeyFrame(1.0f, to);
+    fade.Duration(duration);
+    visual.StartAnimation(L"Opacity", fade);
+}
+
+winrt::Windows::UI::Color SystemAccentColor(winrt::Windows::UI::ViewManagement::UIColorType type)
+{
+    try
+    {
+        return winrt::Windows::UI::ViewManagement::UISettings().GetColorValue(type);
+    }
+    catch (const winrt::hresult_error& error)
+    {
+        DebugLogHResult(L"Query system accent color", error.code());
+        return {0xFF, 0x00, 0x78, 0xD4};
+    }
+}
+
+bool SystemAnimationsEnabled()
+{
+    try
+    {
+        return winrt::Windows::UI::ViewManagement::UISettings().AnimationsEnabled();
+    }
+    catch (const winrt::hresult_error&)
+    {
+        return true;
+    }
 }
 }
 std::vector<ItemGeometry> MainView::GetItemGeometries() const
@@ -113,7 +172,20 @@ void MainView::Shutdown()
     {
         winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(appSwitcherContainer_, nullptr);
     }
+    if (focusBorder_)
+    {
+        winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(focusBorder_, nullptr);
+    }
+    focusVisual_ = nullptr;
+    focusProps_ = nullptr;
+    focusOuterGeometry_ = nullptr;
+    focusInnerGeometry_ = nullptr;
+    focusClipGeometry_ = nullptr;
+    focusAccentBrush_ = nullptr;
+    focusInnerBrush_ = nullptr;
+    focusRingShown_ = false;
     appSwitcherContainer_ = nullptr;
+    appSwitcherStroke_ = nullptr;
     layoutCanvas_ = nullptr;
     focusBorder_ = nullptr;
     emptyGrid_ = nullptr;
@@ -220,7 +292,7 @@ bool MainView::SetSelectedIndex(size_t index)
     }
 
     selectedItemIndex_ = index;
-    UpdateSelectionVisual();
+    UpdateSelectionVisual(true);
     return true;
 }
 
@@ -360,13 +432,15 @@ void MainView::ApplyTheme(AppThemeMode mode, bool active)
     const bool activeChanged = (isWindowActive_ != active);
     const bool brushExists = (containerAcrylicVisual_ && containerAcrylicVisual_.Brush());
 
+    themeMode_ = mode;
+    isWindowActive_ = active;
+    // 系统强调色与动画开关可能在两次呼出之间被修改，不受下面的提前返回影响。
+    UpdateFocusRingStyle();
+
     if (!themeChanged && !activeChanged && brushExists)
     {
         return;
     }
-
-    themeMode_ = mode;
-    isWindowActive_ = active;
 
     if (appSwitcherContainer_)
     {
@@ -538,6 +612,10 @@ void MainView::ResetInteractionState()
     {
         appSwitcherContainer_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
     }
+    if (appSwitcherStroke_)
+    {
+        appSwitcherStroke_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+    }
 
     for (auto& item : cards_)
     {
@@ -552,6 +630,7 @@ void MainView::ResetInteractionState()
         }
         item->ApplyInteractionState();
     }
+    UpdateSelectionVisual();
 }
 
 void MainView::BeginGrab(size_t itemIndex)
@@ -570,6 +649,10 @@ void MainView::BeginGrab(size_t itemIndex)
     {
         appSwitcherContainer_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
     }
+    if (appSwitcherStroke_)
+    {
+        appSwitcherStroke_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+    }
 
     for (size_t i = 0; i < cards_.size(); ++i)
     {
@@ -584,6 +667,7 @@ void MainView::BeginGrab(size_t itemIndex)
         }
         item->ApplyInteractionState();
     }
+    UpdateSelectionVisual();
 }
 
 void MainView::FinishPressedItem(size_t itemIndex, PointDip releasePoint)
@@ -745,8 +829,10 @@ bool MainView::LoadRoot()
             }
             winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(appSwitcherContainer_, containerAcrylicVisual_);
         }
+        appSwitcherStroke_ = root_.FindName(L"AppSwitcherStroke").as<winrt::Windows::UI::Xaml::Controls::Border>();
         layoutCanvas_ = root_.FindName(L"LayoutCanvas").as<winrt::Windows::UI::Xaml::Controls::Canvas>();
         focusBorder_ = root_.FindName(L"FocusBorder").as<winrt::Windows::UI::Xaml::Controls::Border>();
+        CreateFocusRing();
         emptyGrid_ = root_.FindName(L"EmptyGrid").as<winrt::Windows::UI::Xaml::FrameworkElement>();
         emptyIcon_ = root_.FindName(L"EmptyIcon").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
         emptyText_ = root_.FindName(L"EmptyText").as<winrt::Windows::UI::Xaml::Controls::TextBlock>();
@@ -930,17 +1016,30 @@ void MainView::UpdateVisibleBoundsAndPositions()
         layoutCanvas_.Height(visibleBoundsDip_.height);
     }
 
+    if (focusBorder_)
+    {
+        focusBorder_.Width(visibleBoundsDip_.width);
+        focusBorder_.Height(visibleBoundsDip_.height);
+    }
+
+    if (focusVisual_)
+    {
+        focusVisual_.Size({visibleBoundsDip_.width, visibleBoundsDip_.height});
+    }
+
     const float widthDip = contentBoundsDip_.width;
     const float heightDip = contentBoundsDip_.height;
 
-
-
-    if (appSwitcherContainer_)
+    for (const auto& container : {appSwitcherContainer_, appSwitcherStroke_})
     {
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(appSwitcherContainer_, contentOriginDip_.x);
-        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(appSwitcherContainer_, contentOriginDip_.y);
-        appSwitcherContainer_.Width(widthDip);
-        appSwitcherContainer_.Height(heightDip);
+        if (!container)
+        {
+            continue;
+        }
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(container, contentOriginDip_.x);
+        winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(container, contentOriginDip_.y);
+        container.Width(widthDip);
+        container.Height(heightDip);
     }
 
     if (containerAcrylicVisual_)
@@ -986,9 +1085,160 @@ void MainView::EnsureSelectedIndex()
     }
 }
 
-void MainView::UpdateSelectionVisual()
+double MainView::FocusResource(const wchar_t* key, double fallback) const
 {
     if (!focusBorder_)
+    {
+        return fallback;
+    }
+
+    auto res = focusBorder_.Resources();
+    const auto boxedKey = winrt::box_value(key);
+    return res.HasKey(boxedKey) ? winrt::unbox_value<double>(res.Lookup(boxedKey)) : fallback;
+}
+
+void MainView::CreateFocusRing()
+{
+    if (!focusBorder_)
+    {
+        return;
+    }
+
+    try
+    {
+        auto compositor = winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::GetElementVisual(focusBorder_).Compositor();
+        focusProps_ = compositor.CreatePropertySet();
+        focusProps_.InsertVector2(L"Offset", {});
+        focusProps_.InsertVector2(L"Size", {});
+        focusProps_.InsertVector2(L"Growth", {});
+
+        // props.Offset/Size 是强调色外沿（静止时）的矩形。强调色内沿必须固定贴住白色内圈、只让外沿生长，
+        // 而单条描边做不到各边不等宽，所以把强调色画成一条足够宽（覆盖最大生长）的描边，内沿对齐，
+        // 再用随 Growth 伸出的圆角矩形裁剪出外沿。
+        const float stroke = static_cast<float>(FocusResource(L"StrokeDip", 4.0));
+        const float innerStroke = static_cast<float>(FocusResource(L"InnerStrokeDip", 2.0));
+        const float accentWidth = stroke + static_cast<float>(FocusResource(L"GrowMaxDip", 5.0));
+        // 宽描边中线 = 强调色内沿外扩半个宽描边。
+        const float accentInset = stroke - accentWidth * 0.5f;
+        // 白色内圈中线 = 强调色内沿内缩半个内圈宽度。
+        const float innerInset = stroke + innerStroke * 0.5f;
+
+        auto bind = [&](auto const& target, wchar_t const* property, wchar_t const* expression) {
+            auto animation = compositor.CreateExpressionAnimation(expression);
+            animation.SetReferenceParameter(L"props", focusProps_);
+            animation.SetScalarParameter(L"accentInset", accentInset);
+            animation.SetScalarParameter(L"innerInset", innerInset);
+            target.StartAnimation(property, animation);
+        };
+
+        focusClipGeometry_ = compositor.CreateRoundedRectangleGeometry();
+        // 外沿只在 Growth 的符号方向上伸出：负值向左/上扩（移原点），正值向右/下扩（只加尺寸）。
+        bind(focusClipGeometry_, L"Offset", L"props.Offset + Vector2(Min(props.Growth.X, 0), Min(props.Growth.Y, 0))");
+        bind(focusClipGeometry_, L"Size", L"props.Size + Vector2(Abs(props.Growth.X), Abs(props.Growth.Y))");
+
+        focusOuterGeometry_ = compositor.CreateRoundedRectangleGeometry();
+        bind(focusOuterGeometry_, L"Offset", L"props.Offset + Vector2(accentInset, accentInset)");
+        bind(focusOuterGeometry_, L"Size", L"props.Size - Vector2(accentInset * 2, accentInset * 2)");
+
+        focusInnerGeometry_ = compositor.CreateRoundedRectangleGeometry();
+        bind(focusInnerGeometry_, L"Offset", L"props.Offset + Vector2(innerInset, innerInset)");
+        bind(focusInnerGeometry_, L"Size", L"props.Size - Vector2(innerInset * 2, innerInset * 2)");
+
+        focusAccentBrush_ = compositor.CreateColorBrush();
+        focusInnerBrush_ = compositor.CreateColorBrush();
+
+        auto outerShape = compositor.CreateSpriteShape(focusOuterGeometry_);
+        outerShape.StrokeBrush(focusAccentBrush_);
+        outerShape.StrokeThickness(accentWidth);
+        auto innerShape = compositor.CreateSpriteShape(focusInnerGeometry_);
+        innerShape.StrokeBrush(focusInnerBrush_);
+        innerShape.StrokeThickness(innerStroke);
+
+        focusVisual_ = compositor.CreateShapeVisual();
+        focusVisual_.Shapes().Append(innerShape);
+        focusVisual_.Shapes().Append(outerShape);
+        focusVisual_.Clip(compositor.CreateGeometricClip(focusClipGeometry_));
+        focusVisual_.Opacity(0.0f);
+        focusRingShown_ = false;
+        winrt::Windows::UI::Xaml::Hosting::ElementCompositionPreview::SetElementChildVisual(focusBorder_, focusVisual_);
+
+        UpdateFocusRingStyle();
+    }
+    catch (const winrt::hresult_error& error)
+    {
+        DebugLogHResult(L"Create focus ring visual", error.code());
+        focusVisual_ = nullptr;
+        focusProps_ = nullptr;
+    }
+}
+
+void MainView::UpdateFocusRingStyle()
+{
+    animationsEnabled_ = SystemAnimationsEnabled();
+    if (!focusAccentBrush_ || !focusInnerBrush_)
+    {
+        return;
+    }
+
+    // 参照 Win11 Alt+Tab：外层为主题强调色，内层为白色（取 WinUI 浅色主题 ControlFillColorDefault #B3FFFFFF），两种主题一致。
+    focusAccentBrush_.Color(SystemAccentColor(winrt::Windows::UI::ViewManagement::UIColorType::Accent));
+    focusInnerBrush_.Color({0xB3, 0xFF, 0xFF, 0xFF});
+}
+
+void MainView::HideFocusRing(bool animate)
+{
+    if (!focusVisual_ || !focusRingShown_)
+    {
+        return;
+    }
+
+    focusRingShown_ = false;
+    if (animate && animationsEnabled_)
+    {
+        FadeOpacity(focusVisual_, 0.0f, kFocusFadeOutDuration);
+        return;
+    }
+    focusVisual_.StopAnimation(L"Opacity");
+    focusVisual_.Opacity(0.0f);
+}
+
+void MainView::SetFocusGrowth(float x, float y, bool animate)
+{
+    if (!focusProps_)
+    {
+        return;
+    }
+
+    if (animate && animationsEnabled_)
+    {
+        SpringVector2(focusProps_, L"Growth", {x, y});
+        return;
+    }
+    SetVector2Now(focusProps_, L"Growth", {x, y});
+}
+
+float MainView::GrowthForAxis(double accumulated, double threshold, int stepX, int stepY) const
+{
+    if (accumulated == 0.0 || threshold <= 0.0)
+    {
+        return 0.0f;
+    }
+
+    const double progress = std::clamp(accumulated / threshold, -1.0, 1.0);
+    double growth = progress * FocusResource(L"GrowMaxDip", 5.0);
+    const int sign = accumulated > 0.0 ? 1 : -1;
+    const bool hasNext = LayoutEngine::CalculateNextSelection(
+                             GetItemGeometries(), selectedItemIndex_, stepX * sign, stepY * sign) != static_cast<size_t>(-1);
+    if (!hasNext)
+    {
+        growth *= FocusResource(L"GrowEdgeResistance", 0.3);
+    }
+    return static_cast<float>(growth);
+}
+
+void MainView::UpdateSelectionVisual(bool animate)
+{
+    if (!focusVisual_ || !focusProps_)
     {
         return;
     }
@@ -996,29 +1246,77 @@ void MainView::UpdateSelectionVisual()
     if (xamlPointerDragging_ || selectedItemIndex_ == static_cast<size_t>(-1) ||
         selectedItemIndex_ >= cards_.size() || !cards_[selectedItemIndex_]->visible)
     {
-        focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Collapsed);
+        HideFocusRing(true);
         return;
     }
 
     const auto& selectedItem = *cards_[selectedItemIndex_];
-    double inflationDip = 10.0;
-    if (focusBorder_)
+    const float gap = static_cast<float>(FocusResource(L"InflationDip", 6.0));
+    const float stroke = static_cast<float>(FocusResource(L"StrokeDip", 4.0));
+    const float innerStroke = static_cast<float>(FocusResource(L"InnerStrokeDip", 2.0));
+    const float accentWidth = stroke + static_cast<float>(FocusResource(L"GrowMaxDip", 5.0));
+    // 从卡片边缘向外：留空 → 白色内圈 → 强调色；outerInflation 为强调色外沿（静止时）到卡片边缘的距离。
+    // 各圆角 = 卡片圆角 + 该线到卡片边缘的距离，保证与卡片同心；描边几何取中线。
+    const float outerInflation = gap + innerStroke + stroke;
+    const float accentCenterInflation = gap + innerStroke + accentWidth * 0.5f;
+    const float innerInflation = gap + innerStroke * 0.5f;
+    const float cardRadius = selectedItem.mainCard
+                                 ? static_cast<float>(selectedItem.mainCard.CornerRadius().TopLeft)
+                                 : 10.0f;
+    focusClipGeometry_.CornerRadius({cardRadius + outerInflation, cardRadius + outerInflation});
+    focusOuterGeometry_.CornerRadius({cardRadius + accentCenterInflation, cardRadius + accentCenterInflation});
+    focusInnerGeometry_.CornerRadius({cardRadius + innerInflation, cardRadius + innerInflation});
+
+    const float2 offset{
+        selectedItem.layoutPosition.x - outerInflation,
+        selectedItem.layoutPosition.y - outerInflation};
+    const float2 size{
+        selectedItem.layoutSize.width + outerInflation * 2.0f,
+        selectedItem.layoutSize.height + outerInflation * 2.0f};
+    const bool targetUnchanged =
+        std::abs(offset.x - focusTargetOffset_.x) < 0.5f && std::abs(offset.y - focusTargetOffset_.y) < 0.5f &&
+        std::abs(size.x - focusTargetSize_.x) < 0.5f && std::abs(size.y - focusTargetSize_.y) < 0.5f;
+    focusTargetOffset_ = offset;
+    focusTargetSize_ = size;
+
+    if (focusRingShown_ && targetUnchanged)
     {
-        auto res = focusBorder_.Resources();
-        if (res.HasKey(winrt::box_value(L"InflationDip")))
-        {
-            inflationDip = winrt::unbox_value<double>(res.Lookup(winrt::box_value(L"InflationDip")));
-        }
+        return;
     }
-    winrt::Windows::UI::Xaml::Controls::Canvas::SetLeft(
-        focusBorder_,
-        selectedItem.layoutPosition.x - inflationDip);
-    winrt::Windows::UI::Xaml::Controls::Canvas::SetTop(
-        focusBorder_,
-        selectedItem.layoutPosition.y - inflationDip);
-    focusBorder_.Width(selectedItem.layoutSize.width + inflationDip * 2.0);
-    focusBorder_.Height(selectedItem.layoutSize.height + inflationDip * 2.0);
-    focusBorder_.Visibility(winrt::Windows::UI::Xaml::Visibility::Visible);
+
+    if (!focusRingShown_)
+    {
+        // 首次出现（呼出、拖拽结束）没有上一个位置可滑，改为从外扩处淡入并收缩到位。
+        focusRingShown_ = true;
+        SetFocusGrowth(0.0f, 0.0f, false);
+        focusVisual_.StopAnimation(L"Opacity");
+        if (animationsEnabled_)
+        {
+            const float entrance = static_cast<float>(FocusResource(L"EntranceInflationDip", 8.0));
+            SetVector2Now(focusProps_, L"Offset", offset - float2{entrance, entrance});
+            SetVector2Now(focusProps_, L"Size", size + float2{entrance * 2.0f, entrance * 2.0f});
+            focusVisual_.Opacity(0.0f);
+            FadeOpacity(focusVisual_, 1.0f, kFocusFadeInDuration);
+            SpringVector2(focusProps_, L"Offset", offset);
+            SpringVector2(focusProps_, L"Size", size);
+        }
+        else
+        {
+            SetVector2Now(focusProps_, L"Offset", offset);
+            SetVector2Now(focusProps_, L"Size", size);
+            focusVisual_.Opacity(1.0f);
+        }
+        return;
+    }
+
+    if (animate && animationsEnabled_)
+    {
+        SpringVector2(focusProps_, L"Offset", offset);
+        SpringVector2(focusProps_, L"Size", size);
+        return;
+    }
+    SetVector2Now(focusProps_, L"Offset", offset);
+    SetVector2Now(focusProps_, L"Size", size);
 }
 
 void MainView::ApplyLayout(
@@ -1198,9 +1496,14 @@ bool MainView::AccumulateAndMoveSelection(double deltaX, double deltaY)
         {
             if (MoveSelection(steps, 0, false))
             {
+                // 整框已移到下一张，生长清零，下一次切换要重新走满一个阈值。
                 selectedChanged = true;
+                gestureAccX_ = 0.0;
             }
-            gestureAccX_ = std::fmod(gestureAccX_, currentSnapThresholdX);
+            else
+            {
+                gestureAccX_ = std::fmod(gestureAccX_, currentSnapThresholdX);
+            }
         }
     }
 
@@ -1212,10 +1515,20 @@ bool MainView::AccumulateAndMoveSelection(double deltaX, double deltaY)
             if (MoveSelection(0, steps, false))
             {
                 selectedChanged = true;
+                gestureAccY_ = 0.0;
             }
-            gestureAccY_ = std::fmod(gestureAccY_, currentSnapThresholdY);
+            else
+            {
+                gestureAccY_ = std::fmod(gestureAccY_, currentSnapThresholdY);
+            }
         }
     }
+
+    // 外层描边朝手指方向生长，到阈值时恰好长满；刚切换时生长量骤降，用弹簧收回避免跳变。
+    SetFocusGrowth(
+        GrowthForAxis(gestureAccX_, currentSnapThresholdX, 1, 0),
+        GrowthForAxis(gestureAccY_, currentSnapThresholdY, 0, 1),
+        selectedChanged);
 
     return selectedChanged;
 }
@@ -1224,11 +1537,14 @@ void MainView::ClearGestureAccumulator()
 {
     gestureAccX_ = 0.0;
     gestureAccY_ = 0.0;
+    SetFocusGrowth(0.0f, 0.0f, true);
 }
 
 void MainView::ResetSelection()
 {
     selectedItemIndex_ = static_cast<size_t>(-1);
+    // 下次呼出从隐藏态重新出现，播放入场动画而不是从上次的位置滑过去。
+    HideFocusRing(false);
 }
 }
 

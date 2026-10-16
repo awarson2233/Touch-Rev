@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <cstdint>
+#include <memory>
 #include <vector>
 
 class InputController
@@ -56,9 +57,10 @@ public:
     Result OnTouch(HWND hwnd, WPARAM wParam, LPARAM lParam, const CoordinateSpace& coordinates, PointDip currentPosition, bool canStartDrag);
     // 一条 WM_INPUT 可能完成多帧，每帧各产出一个结果，按顺序分发。
     std::vector<RawInputResult> OnRawInput(LPARAM lParam);
-    RawInputResult OnGestureTick();
-    // 手势会话进行中才需要定时推进状态机。
-    bool NeedsGestureTick() const { return gestureRecognizer_.HasActiveSession(); }
+    // 每块触摸屏各自推进一次状态机，按设备顺序返回结果。
+    std::vector<RawInputResult> OnGestureTick();
+    // 任一触摸屏有手势会话进行中才需要定时推进状态机。
+    bool NeedsGestureTick() const;
     // 丢弃原始触点与识别器状态（例如手势识别被关闭时）。
     void ResetGesture();
     void OnInputDeviceChange(WPARAM wParam, LPARAM lParam);
@@ -75,6 +77,19 @@ private:
         bool valid = false;
     };
 
+    // 每块触摸屏独立识别：contactId 按设备各自从 0 起编，共用识别器会互相覆盖，
+    // 而只锁定一块屏又会让另一块屏在会话未结束时完全失效。
+    struct DeviceGesture
+    {
+        HANDLE device = nullptr;
+        RawTouchInput::DeviceGeometry geometry{};
+        ThreeFingerGestureRecognizer recognizer;
+        // 长按手势期间缓存的显示旋转（0/90/180/270 对应 0..3），在 LongPressBegin 计算一次。
+        int cachedRotation = 0;
+    };
+
+    DeviceGesture& GetDeviceGesture(HANDLE device);
+
     static bool TryGetPointerDip(HWND hwnd, UINT32 pointerId, const CoordinateSpace& coordinates, PointDip& point);
 
     Result UpdateDragFromPointerHistory(HWND hwnd, UINT32 pointerId, const CoordinateSpace& coordinates);
@@ -88,10 +103,11 @@ private:
 
     // 把识别器事件映射成 RawInputResult。
     RawInputResult MapGestureEvent(
+        DeviceGesture& gesture,
         const ThreeFingerGestureRecognizer::Result& gestureResult,
         bool allContactsReleased);
     // 按手势所在触摸屏的量程与显示映射，把 HID 逻辑坐标换算为屏幕像素，并给出该屏的旋转。
-    bool MapGestureCenterToScreen(LONG rawX, LONG rawY, bool hasRaw, POINT& screenPoint, int& rotation) const;
+    bool MapGestureCenterToScreen(const DeviceGesture& gesture, LONG rawX, LONG rawY, bool hasRaw, POINT& screenPoint, int& rotation) const;
 
     HWND hwnd_ = nullptr;
     bool pointerDragging_ = false;
@@ -103,15 +119,11 @@ private:
     float dragOffsetY_ = 0.0f;
     PointDip currentPosition_{};
     RawTouchInput rawTouchInput_;
-    ThreeFingerGestureRecognizer gestureRecognizer_;
+    // 元素按需创建；用 unique_ptr 保证扩容时已有识别器的地址不变。
+    std::vector<std::unique_ptr<DeviceGesture>> deviceGestures_;
     PointerSample previousSample_{};
     PointerSample latestSample_{};
     float smoothedVelocityX_ = 0.0f;
     float smoothedVelocityY_ = 0.0f;
     bool hasSmoothedVelocity_ = false;
-    // 长按手势期间缓存的显示旋转（0/90/180/270 对应 0..3），在 LongPressBegin 计算一次。
-    int cachedGestureRotation_ = 0;
-    // 当前手势会话所属的触摸屏。识别器的 contactId 不区分设备，会话期间只接受这一块屏的帧。
-    HANDLE gestureDevice_ = nullptr;
-    RawTouchInput::DeviceGeometry gestureGeometry_{};
 };
