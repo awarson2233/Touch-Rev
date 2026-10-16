@@ -46,6 +46,8 @@ private:
 
     void SyncConfigToUi();
     void RefreshAutoStartUi();
+    void RefreshRunAsAdminUi();
+    void OnRunAsAdminToggled(bool enable);
     void RefreshPdbCacheUi();
     SIZE ClientSizePx(UINT dpi) const;
 
@@ -86,6 +88,8 @@ private:
     winrt::Windows::UI::Xaml::Controls::ToggleSwitch autoStartToggle_{nullptr};
     winrt::Windows::UI::Xaml::Controls::ToggleSwitch autoInstallToggle_{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock autoStartDescription_{nullptr};
+    winrt::Windows::UI::Xaml::Controls::ToggleSwitch runAsAdminToggle_{nullptr};
+    winrt::Windows::UI::Xaml::Controls::TextBlock runAsAdminDescription_{nullptr};
     winrt::Windows::UI::Xaml::Controls::TextBlock pdbCacheDescription_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Button clearCacheButton_{nullptr};
     winrt::Windows::UI::Xaml::Controls::Button openCacheFolderButton_{nullptr};

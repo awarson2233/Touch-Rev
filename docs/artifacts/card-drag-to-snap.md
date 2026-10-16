@@ -135,6 +135,6 @@ sequenceDiagram
 
 ### 边界情况
 
-- **提权窗口**：代理拖动正常，最后的 `SetWindowPos` 被 UIPI 拒绝，真实窗口不动，与改造前的行为一致。
+- **提权窗口**：普通权限运行时代理拖动正常，但最后的 `SetWindowPos` 被 UIPI 拒绝，真实窗口不动。配置窗口开启"以管理员身份运行"后进程自我提权（开机自启改用以最高权限运行的计划任务），任务管理器等提权窗口即可正常拖动和切换。
 - **旧系统**：缺 `ConvertPrimaryPointerToMouseDrag` 时触摸拖动不交接，由切换器内的原有拖动接管；缺 `EnterMoveSizeLoop` 时代理已显示、切换器已隐藏，`StartPendingWindowDrag` 销毁代理并把真实窗口激活到当前光标处。
 - **鼠标拖动**：跳过转换，直接进入代理的移动循环。前提是进程**不能**开启 `EnableMouseInPointer`：它对整个进程生效且无法关闭，开启后真鼠标以 `WM_POINTER*` 送达，移动循环只在开头几十毫秒跟手，之后鼠标移动全被派发进代理的窗口过程（实测每 60 ms 三五十条），循环本身收不到，代理停在原地，直到松手才一步追到光标处。触摸经 `ConvertPrimaryPointerToMouseDrag` 转换出的拖拽不受影响，所以只有鼠标会卡。因此 [InputController.cpp](/core/input/InputController.cpp) 不再开启它，切换器的鼠标走传统 `WM_*BUTTON*` 消息。

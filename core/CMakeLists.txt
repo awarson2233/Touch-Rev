@@ -5,6 +5,8 @@ add_library(touchrev_core STATIC
     common/AppSettings.h
     common/AutoStart.cpp
     common/AutoStart.h
+    common/Elevation.cpp
+    common/Elevation.h
     common/PdbCache.cpp
     common/PdbCache.h
     common/RegistryUtils.h
@@ -62,6 +64,8 @@ target_link_libraries(touchrev_core PUBLIC
     gdi32
     dwmapi
     ole32
+    oleaut32
+    taskschd
     runtimeobject
     advapi32
     shell32

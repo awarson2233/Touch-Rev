@@ -9,6 +9,8 @@
 namespace touchrev::appswitcher
 {
 std::vector<WindowItem> EnumerateActiveWindows(HWND excludeHwnd);
+// 注入空鼠标输入，让本进程获得 SetForegroundWindow 的权限。手势经 raw input 旁听，本进程收不到真实输入。
+void AcquireForegroundRights();
 void ActivateWindow(HWND targetHwnd);
 bool RequestCloseWindow(HWND targetHwnd);
 void ActivateWindow(HWND targetHwnd, POINT centerPoint, const RECT& fallbackWorkAreaPx);

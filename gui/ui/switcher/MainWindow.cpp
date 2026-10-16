@@ -123,6 +123,9 @@ bool MainWindow::Initialize(HINSTANCE instance, int showCommand)
         return false;
     }
 
+    // 以管理员身份运行时，普通权限的新实例发来的唤醒命令（--toggle/--exit 等）会被 UIPI 丢弃，需显式放行。
+    ChangeWindowMessageFilterEx(hwnd_, wakeMessage_, MSGFLT_ALLOW, nullptr);
+
     ApplyWorkAreaInsets();
     ShowWindow(hwnd_, SW_SHOWNA);
     UpdateWindow(hwnd_);
@@ -636,6 +639,10 @@ MainWindow::ActivationResult MainWindow::TryActivateSwitcher()
         SetFocus(hwnd_);
         return result;
     }
+
+    // 手势只经 raw input 旁听，触点属于原前台应用，本进程不是"最近收到输入的进程"。
+    // 显示时先拿到前台权限：切换器自身能激活，长按松手后切到选中窗口也不会被前台锁拒绝。
+    touchrev::appswitcher::AcquireForegroundRights();
 
     // 第一次尝试：直接调用 SetForegroundWindow
     result.directSucceeded = SetForegroundWindow(hwnd_) != FALSE && GetForegroundWindow() == hwnd_;

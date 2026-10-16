@@ -67,6 +67,13 @@ bool TrayIcon::Initialize(HINSTANCE instance, TrayCallbacks callbacks)
         return false;
     }
 
+    // 以管理员身份运行时，explorer（普通权限）发来的托盘回调与 TaskbarCreated 会被 UIPI 丢弃，需显式放行。
+    ChangeWindowMessageFilterEx(hwnd_, kTrayCallbackMessage, MSGFLT_ALLOW, nullptr);
+    if (taskbarCreatedMessage_ != 0)
+    {
+        ChangeWindowMessageFilterEx(hwnd_, taskbarCreatedMessage_, MSGFLT_ALLOW, nullptr);
+    }
+
     RefreshIconImage();
     return AddNotifyIcon();
 }

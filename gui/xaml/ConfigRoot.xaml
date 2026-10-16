@@ -336,6 +336,25 @@
                         <ColumnDefinition Width="*" />
                         <ColumnDefinition Width="Auto" />
                     </Grid.ColumnDefinitions>
+                    <FontIcon Grid.Column="0" Glyph="&#xE7EF;" Style="{StaticResource CardGlyphStyle}" />
+                    <StackPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center">
+                        <TextBlock Style="{StaticResource CardTitleStyle}" Text="以管理员身份运行" />
+                        <TextBlock
+                            x:Name="RunAsAdminDescription"
+                            Style="{StaticResource CardDescriptionStyle}"
+                            Text="开启后可拖动、切换任务管理器等管理员窗口" />
+                    </StackPanel>
+                    <ToggleSwitch x:Name="RunAsAdminToggle" Grid.Column="2" IsOn="False" Style="{StaticResource CompactToggleStyle}" />
+                </Grid>
+            </Border>
+
+            <Border Style="{StaticResource SettingsCardStyle}">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
                     <FontIcon Grid.Column="0" Glyph="&#xE945;" Style="{StaticResource CardGlyphStyle}" />
                     <StackPanel Grid.Column="1" Margin="0,0,12,0" VerticalAlignment="Center">
                         <TextBlock Style="{StaticResource CardTitleStyle}" Text="启动时自动启用拦截" />

@@ -175,6 +175,15 @@ std::vector<WindowItem> EnumerateActiveWindows(HWND excludeHwnd)
     return state.windows;
 }
 
+void AcquireForegroundRights()
+{
+    // 前台锁只放行前台进程或最近收到输入的进程。注入一个空鼠标输入（不移动、不按键），
+    // 让本进程成为最近收到输入的进程，之后的 SetForegroundWindow 才不会被拒绝。
+    INPUT input{};
+    input.type = INPUT_MOUSE;
+    SendInput(1, &input, sizeof(input));
+}
+
 void ActivateWindow(HWND targetHwnd)
 {
     if (!IsWindow(targetHwnd))
@@ -187,7 +196,44 @@ void ActivateWindow(HWND targetHwnd)
         ShowWindow(targetHwnd, SW_RESTORE);
     }
 
+    // 前台切换受前台锁限制：只有前台进程或最近收到输入的进程才能 SetForegroundWindow。
+    // 三指长按时触点属于原前台应用，本进程只经 raw input 旁听，直接调用可能被拒绝，需要逐级回退。
+    const auto isForeground = [targetHwnd]() {
+        const HWND foreground = GetForegroundWindow();
+        return foreground == targetHwnd ||
+               (foreground && GetAncestor(foreground, GA_ROOTOWNER) == GetAncestor(targetHwnd, GA_ROOTOWNER));
+    };
+
+    const HWND previousForeground = GetForegroundWindow();
+    if (SetForegroundWindow(targetHwnd) && isForeground())
+    {
+        TR_TRACE(L"[Activate] direct target=" << targetHwnd << L" previous=" << previousForeground);
+        return;
+    }
+
+    // 回退一：挂到当前前台线程的输入状态上，借用它的前台权限。
+    const HWND foreground = GetForegroundWindow();
+    const DWORD foregroundThreadId = foreground ? GetWindowThreadProcessId(foreground, nullptr) : 0;
+    const DWORD currentThreadId = GetCurrentThreadId();
+    if (foregroundThreadId != 0 && foregroundThreadId != currentThreadId &&
+        AttachThreadInput(currentThreadId, foregroundThreadId, TRUE))
+    {
+        BringWindowToTop(targetHwnd);
+        SetForegroundWindow(targetHwnd);
+        AttachThreadInput(currentThreadId, foregroundThreadId, FALSE);
+        if (isForeground())
+        {
+            TR_TRACE(L"[Activate] attached target=" << targetHwnd << L" previous=" << previousForeground);
+            return;
+        }
+    }
+
+    // 回退二：切换器显示时已经拿过一次前台权限，长按期间触点仍在别的进程上移动，权限可能已被收回，再拿一次。
+    AcquireForegroundRights();
     SetForegroundWindow(targetHwnd);
+    TR_TRACE(L"[Activate] injected target=" << targetHwnd << L" previous=" << previousForeground
+                                            << L" foreground=" << GetForegroundWindow()
+                                            << L" ok=" << isForeground());
 }
 
 bool RequestCloseWindow(HWND targetHwnd)

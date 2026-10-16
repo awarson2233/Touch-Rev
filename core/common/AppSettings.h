@@ -12,6 +12,8 @@ struct AppSettings {
     bool switcherWindowEnabled = true;
     // 启动时自动把拦截 DLL 注入 explorer
     bool hookAutoInstall = false;
+    // 以管理员身份运行：才能拖动、激活任务管理器等提权窗口（UIPI 拒绝低权限进程操作它们）
+    bool runAsAdmin = false;
 };
 
 // 当前配置。直接改字段不会落盘也不会广播，请走下面的 Set* 接口。
@@ -29,5 +31,6 @@ void Unsubscribe(int token);
 void SetGestureEnabled(bool value);
 void SetSwitcherWindowEnabled(bool value);
 void SetHookAutoInstall(bool value);
+void SetRunAsAdmin(bool value);
 
 }  // namespace touchrev::settings

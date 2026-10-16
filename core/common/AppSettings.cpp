@@ -11,6 +11,7 @@ constexpr wchar_t kSettingsKey[] = L"Software\\Touch-Rev\\Settings";
 constexpr wchar_t kGestureEnabledValue[] = L"GestureEnabled";
 constexpr wchar_t kSwitcherWindowEnabledValue[] = L"SwitcherWindowEnabled";
 constexpr wchar_t kHookAutoInstallValue[] = L"HookAutoInstall";
+constexpr wchar_t kRunAsAdminValue[] = L"RunAsAdmin";
 
 AppSettings g_settings;
 
@@ -70,6 +71,9 @@ void Load() {
     g_settings.hookAutoInstall =
         registry::ReadDword(HKEY_CURRENT_USER, kSettingsKey, kHookAutoInstallValue,
                             g_settings.hookAutoInstall ? 1u : 0u) != 0;
+    g_settings.runAsAdmin =
+        registry::ReadDword(HKEY_CURRENT_USER, kSettingsKey, kRunAsAdminValue,
+                            g_settings.runAsAdmin ? 1u : 0u) != 0;
     Broadcast();
 }
 
@@ -99,6 +103,10 @@ void SetSwitcherWindowEnabled(bool value) {
 
 void SetHookAutoInstall(bool value) {
     Assign(g_settings.hookAutoInstall, kHookAutoInstallValue, value);
+}
+
+void SetRunAsAdmin(bool value) {
+    Assign(g_settings.runAsAdmin, kRunAsAdminValue, value);
 }
 
 }  // namespace touchrev::settings

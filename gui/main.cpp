@@ -3,6 +3,8 @@
 #include "ui/config/ConfigWindow.h"
 #include "ui/shared/TrayIcon.h"
 #include "common/AppSettings.h"
+#include "common/AutoStart.h"
+#include "common/Elevation.h"
 #include "common/Win32Error.h"
 
 #include <windows.h>
@@ -12,6 +14,14 @@
 
 namespace
 {
+// 由旧实例以新权限拉起：旧实例此时仍持有单实例锁、正在退出，需要等它释放而不是转发命令。
+constexpr wchar_t kRelaunchArgument[] = L"--relaunch";
+
+bool HasArgument(PCWSTR argument)
+{
+    return std::wstring(GetCommandLineW()).find(argument) != std::wstring::npos;
+}
+
 MainWindow::ActivationCommand ParseActivationCommand()
 {
     const std::wstring commandLine = GetCommandLineW();
@@ -94,15 +104,27 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int /*showCommand*/)
     }
 
     const MainWindow::ActivationCommand command = ParseActivationCommand();
+    const bool relaunched = HasArgument(kRelaunchArgument);
     HANDLE singleInstanceMutex = CreateMutexW(nullptr, TRUE, MainWindow::SingleInstanceMutexName);
-    if (!singleInstanceMutex)
+    const DWORD mutexError = GetLastError();
+    // 已提权的实例创建的锁带高完整性标签，普通权限进程打开会得到 ERROR_ACCESS_DENIED，同样说明已有实例。
+    bool otherInstance = singleInstanceMutex ? mutexError == ERROR_ALREADY_EXISTS : mutexError == ERROR_ACCESS_DENIED;
+    if (otherInstance && relaunched && singleInstanceMutex)
     {
-        DebugLogHResult(L"CreateMutexW", HResultFromLastError());
+        const DWORD wait = WaitForSingleObject(singleInstanceMutex, 15000);
+        otherInstance = wait != WAIT_OBJECT_0 && wait != WAIT_ABANDONED;
     }
-    else if (GetLastError() == ERROR_ALREADY_EXISTS)
+    if (!singleInstanceMutex && !otherInstance)
+    {
+        DebugLogHResult(L"CreateMutexW", HRESULT_FROM_WIN32(mutexError));
+    }
+    else if (otherInstance)
     {
         const bool redirected = RedirectToExistingInstance(command);
-        CloseHandle(singleInstanceMutex);
+        if (singleInstanceMutex)
+        {
+            CloseHandle(singleInstanceMutex);
+        }
         if (shouldRoUninitialize)
         {
             RoUninitialize();
@@ -131,6 +153,30 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int /*showCommand*/)
 
     // 配置先于窗口载入，手势开关等状态在首帧就是正确的。
     touchrev::settings::Load();
+
+    // 要求以管理员身份运行时自我提权：新实例带 --relaunch 等本进程退出后接管单实例锁。
+    // 用户在 UAC 里取消就以普通权限继续，只是拖不动管理员窗口。
+    bool elevationDeclined = false;
+    if (touchrev::settings::Current().runAsAdmin && !touchrev::common::elevation::IsElevated() && !relaunched)
+    {
+        std::wstring arguments = kRelaunchArgument;
+        if (command == MainWindow::ActivationCommand::Hide)
+        {
+            arguments += L" --hide";
+        }
+        else if (command == MainWindow::ActivationCommand::Toggle)
+        {
+            arguments += L" --toggle";
+        }
+        if (touchrev::common::elevation::RelaunchElevated(arguments))
+        {
+            return cleanup(0);
+        }
+        elevationDeclined = true;
+    }
+
+    // 切换过"以管理员身份运行"后，把开机自启改写成对应形式（Run 项 / 计划任务）。
+    touchrev::common::autostart::Sync();
 
     MainWindow app;
     ConfigWindow config;
@@ -220,6 +266,10 @@ int APIENTRY wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int /*showCommand*/)
     if (!tray.Initialize(instance, std::move(trayCallbacks)))
     {
         DebugLog(L"Tray icon initialization failed; continuing without a tray entry.");
+    }
+    if (elevationDeclined)
+    {
+        tray.Notify(L"Touch-Rev", L"未获得管理员权限，当前以普通权限运行，无法拖动或切换任务管理器等管理员窗口。");
     }
 
     switch (command)

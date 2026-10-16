@@ -2,6 +2,7 @@
 
 #include "common/AppSettings.h"
 #include "common/AutoStart.h"
+#include "common/Elevation.h"
 #include "common/FileUtils.h"
 #include "common/PathUtils.h"
 #include "common/PdbCache.h"
@@ -293,6 +294,7 @@ void ConfigWindow::Show()
     SetForegroundWindow(hwnd_);
     SyncConfigToUi();
     RefreshAutoStartUi();
+    RefreshRunAsAdminUi();
     RefreshPdbCacheUi();
     SetTimer(hwnd_, kRefreshTimerId, 1000, nullptr);
 }
@@ -516,6 +518,8 @@ HRESULT ConfigWindow::OnCreate()
         autoStartToggle_ = FindElement<Controls::ToggleSwitch>(root, L"AutoStartToggle");
         autoInstallToggle_ = FindElement<Controls::ToggleSwitch>(root, L"AutoInstallToggle");
         autoStartDescription_ = FindElement<Controls::TextBlock>(root, L"AutoStartDescription");
+        runAsAdminToggle_ = FindElement<Controls::ToggleSwitch>(root, L"RunAsAdminToggle");
+        runAsAdminDescription_ = FindElement<Controls::TextBlock>(root, L"RunAsAdminDescription");
         pdbCacheDescription_ = FindElement<Controls::TextBlock>(root, L"PdbCacheDescription");
         clearCacheButton_ = FindElement<Controls::Button>(root, L"ClearCacheButton");
         openCacheFolderButton_ = FindElement<Controls::Button>(root, L"OpenCacheFolderButton");
@@ -613,6 +617,7 @@ HRESULT ConfigWindow::OnCreate()
 
         SyncConfigToUi();
         RefreshAutoStartUi();
+        RefreshRunAsAdminUi();
         RefreshPdbCacheUi();
 
         if (hookToggle_)
@@ -687,6 +692,17 @@ HRESULT ConfigWindow::OnCreate()
                     MessageBoxW(hwnd_, L"写入开机启动项失败。", L"Touch-Rev", MB_OK | MB_ICONERROR);
                 }
                 RefreshAutoStartUi();
+            });
+        }
+
+        if (runAsAdminToggle_)
+        {
+            runAsAdminToggle_.Toggled([this](auto const&, auto const&) {
+                if (isSyncingUi_)
+                {
+                    return;
+                }
+                OnRunAsAdminToggled(runAsAdminToggle_.IsOn());
             });
         }
 
@@ -873,6 +889,74 @@ void ConfigWindow::RefreshAutoStartUi()
     else
     {
         autoStartDescription_.Text(L"开启后随 Windows 登录自动运行并驻留托盘");
+    }
+}
+
+void ConfigWindow::OnRunAsAdminToggled(bool enable)
+{
+    touchrev::settings::SetRunAsAdmin(enable);
+
+    // 开启时当前进程还没提权：以管理员身份拉起新实例并退出自己，新实例等本进程释放单实例锁后接管。
+    if (enable && !touchrev::common::elevation::IsElevated())
+    {
+        DWORD error = ERROR_SUCCESS;
+        if (touchrev::common::elevation::RelaunchElevated(L"--relaunch", &error))
+        {
+            if (exitCallback_)
+            {
+                exitCallback_();
+            }
+            return;
+        }
+
+        touchrev::settings::SetRunAsAdmin(false);
+        if (error != ERROR_CANCELLED)
+        {
+            MessageBoxW(hwnd_, L"无法以管理员身份启动。", L"Touch-Rev", MB_OK | MB_ICONERROR);
+        }
+    }
+    else
+    {
+        // 已提权时直接迁移开机自启；关闭时进程保持管理员身份到下次启动。
+        touchrev::common::autostart::Sync();
+    }
+
+    RefreshAutoStartUi();
+    RefreshRunAsAdminUi();
+}
+
+void ConfigWindow::RefreshRunAsAdminUi()
+{
+    const bool requested = touchrev::settings::Current().runAsAdmin;
+    const bool elevated = touchrev::common::elevation::IsElevated();
+
+    isSyncingUi_ = true;
+    if (runAsAdminToggle_ && runAsAdminToggle_.IsOn() != requested)
+    {
+        runAsAdminToggle_.IsOn(requested);
+    }
+    isSyncingUi_ = false;
+
+    if (!runAsAdminDescription_)
+    {
+        return;
+    }
+
+    if (requested && elevated)
+    {
+        runAsAdminDescription_.Text(L"可拖动、切换任务管理器等管理员窗口；开机自启改用计划任务，不弹 UAC");
+    }
+    else if (requested)
+    {
+        runAsAdminDescription_.Text(L"未获得管理员权限，当前以普通权限运行");
+    }
+    else if (elevated)
+    {
+        runAsAdminDescription_.Text(L"当前仍以管理员身份运行，重启应用后恢复普通权限");
+    }
+    else
+    {
+        runAsAdminDescription_.Text(L"开启后可拖动、切换任务管理器等管理员窗口");
     }
 }
 
